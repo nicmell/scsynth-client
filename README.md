@@ -234,8 +234,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 With the feature `web`, on `wasm32`, the crate has two transports over
 the objects of the browser: `WebSocketClient` and `PortClient`. They run
 in a page and in a worker. On a native target, the feature holds nothing.
-These transports build for `wasm32-unknown-unknown`, but no test runs
-them yet.
+These transports build for `wasm32-unknown-unknown`. No test runs them,
+and the page of [`examples/vite`](examples/vite/README.md) ran them by hand
+in Chrome 158.
 
 - `send` encodes the packet, hands its bytes to the browser, and returns.
   The browser queues them, and `send` waits for no network.
@@ -255,6 +256,14 @@ them yet.
 binary type `arraybuffer`, and ends at its `open` event. If the browser
 refuses the URL, or if an `error` or a `close` event comes before the
 `open` event, it gives `ClientError::Transport`.
+
+`open` sets no limit. A server that takes the connection and never
+answers the handshake keeps it waiting. The browser takes a relative URL
+against the address of the page or the worker: from a page of
+`http://localhost:5199`, Chrome 158 opened `not a url` as
+`ws://localhost:5199/not%20a%20url`. The dev server of Vite took that
+connection and did not answer its handshake in 30 seconds. A caller that
+needs a limit races `open` against a timer of its own.
 
 Each packet is one binary frame, each way. A frame from the other end
 comes as its messages, in order. Bytes that are no OSC packet come as an
@@ -818,6 +827,15 @@ only a `request` of the caller with `/c_set` can take the `/fail` of a
 out of range, scsynth 3.14.1 answers `/fail /c_get "index out of range"`.
 `get_bus` gives it as `Error::Failed`. Without a `/c_set` that holds its
 index, `get_bus` gives `Error::NoReply`.
+
+## Examples
+
+The repository has two examples, each a crate of its own with its own
+lock. [`examples/bridge`](examples/bridge/README.md) is the bridge of
+[WebSocket](#websocket). [`examples/vite`](examples/vite/README.md) is a
+Vite page that runs `Scsynth` in the browser, compiled to wasm, and plays
+a sine through the bridge: over a `WebSocketClient`, over a `PortClient`
+to a worker, or over a transport of its own in TypeScript.
 
 ## Tests
 

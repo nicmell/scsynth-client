@@ -71,6 +71,26 @@ private scsynth, as above:
 SCSYNTH_ADDR=127.0.0.1:57341 cargo test --manifest-path examples/bridge/Cargo.toml -- --ignored
 ```
 
+`examples/vite` is the Vite page, with its wasm crate in
+`examples/vite/wasm`, which has its own `Cargo.lock`. Its commands, which
+the CI job `example` runs with `--locked`:
+
+```bash
+cargo fmt --check --manifest-path examples/vite/wasm/Cargo.toml
+cargo clippy --manifest-path examples/vite/wasm/Cargo.toml --target wasm32-unknown-unknown -- -D warnings
+cd examples/vite && npm ci && npm run wasm && npm run build
+```
+
+The page plays a sine. Run it against a private scsynth with no JACK
+connection, as above, with `-l 32`, through the bridge:
+
+```bash
+cargo run --manifest-path examples/bridge/Cargo.toml -- --scsynth 127.0.0.1:57341 --listen 127.0.0.1:57342 --origin http://localhost:5199
+cd examples/vite && npm run dev -- --port 5199 --strictPort
+```
+
+Then open `http://localhost:5199` and connect to `ws://127.0.0.1:57342`.
+
 ## Conventions
 
 - Edition 2024, MSRV 1.85, clippy pedantic, no unsafe code, docs on every

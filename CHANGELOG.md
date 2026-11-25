@@ -94,3 +94,6 @@ scsynth-synthdef 0.15.0 by git tag.
 - `examples/bridge`, a program that lets a page reach scsynth: it pipes
   each websocket to its own TCP connection to scsynth. See
   [its README](examples/bridge/README.md).
+- `examples/vite`, a Vite page that runs `Scsynth` in the browser through
+  the bridge, over a `WebSocketClient`, a `PortClient` to a worker, or a
+  transport of its own in TypeScript. See [its README](examples/vite/README.md).
