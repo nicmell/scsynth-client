@@ -16,3 +16,6 @@ scsynth-synthdef 0.15.0 by git tag.
   where they decode. See [Bytes](README.md#bytes).
 - `ChannelClient` and `ChannelPeer`: a pair in memory that delivers in the
   same call stack. See [The channel pair](README.md#the-channel-pair).
+- `Error`: why a request to scsynth gives no result: `Failed` with the
+  `/fail` of scsynth, `Timeout`, or `Send` with the `SendError` of the
+  transport.
