@@ -352,7 +352,6 @@ impl Scsynth {
 
 /// The id of a new node, from a node id of the range of the client.
 fn new_node(id: NodeId) -> NewNodeId {
-    // The ranges of the client ids 0 to 31 hold no negative node id.
     NewNodeId::new(id.0).expect("a node id of a range is 0 or more")
 }
 

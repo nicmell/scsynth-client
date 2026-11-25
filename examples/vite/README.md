@@ -95,8 +95,11 @@ await scsynth.close()
 Each method that waits for scsynth gives a promise. A refusal is a JS
 `Error` with the text of the error of scsynth-client, such as
 `scsynth failed /s_new: SynthDef not found`, or
-`scsynth did not answer within the limit`. The [README of the
-crate](../../README.md#the-client) gives the rules of the requests.
+`scsynth did not answer within the limit`. The text of each cause of the
+error follows, after a colon:
+`the transport did not send the packet: the client is closed`. The
+[README of the crate](../../README.md#the-client) gives the rules of the
+requests.
 
 - A target is `{ head: node }`, `{ tail: node }`, `{ before: node }` or
   `{ after: node }`, and the root group is node 0. The controls are an

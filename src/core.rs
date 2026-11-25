@@ -436,8 +436,6 @@ mod tests {
         all
     }
 
-    // The rules.
-
     #[test]
     fn a_request_leaves_as_one_immediate_bundle_that_ends_in_its_sync() {
         let mut core = Core::new();

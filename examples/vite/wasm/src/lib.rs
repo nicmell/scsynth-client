@@ -3,11 +3,11 @@
 //! of this module, or over any object with the three methods of an
 //! `OscClient`. Bytes cross as a `Uint8Array`, a message of scsynth as the
 //! serde form of scsynth-osc, and an error as a JS `Error` with the text of
-//! the error of the crate.
+//! the error of the crate and of each of its causes.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::error::Error;
 use std::future::{self, Future};
 use std::pin::pin;
 use std::rc::Rc;
@@ -95,7 +95,7 @@ impl WebSocketClientJs {
     pub async fn open(url: String) -> Result<WebSocketClientJs, JsError> {
         let inner = scsynth_client::WebSocketClient::open(&url)
             .await
-            .map_err(|error| JsError::new(&error.to_string()))?;
+            .map_err(|error| js_error(&error))?;
         Ok(Self { inner })
     }
 }
@@ -229,7 +229,7 @@ impl ScsynthJs {
     pub fn register(&self) -> Promise {
         let scsynth = self.scsynth.clone();
         future_to_promise(async move {
-            let registration = scsynth.register().await.map_err(js_error)?;
+            let registration = scsynth.register().await.map_err(|error| js_error(&error))?;
             to_js(&JsRegistration {
                 client_id: registration.client_id,
                 max_logins: registration.max_logins,
@@ -263,7 +263,10 @@ impl ScsynthJs {
     #[wasm_bindgen(unchecked_return_type = "Promise<Record<string, number>>")]
     pub fn status(&self) -> Promise {
         let scsynth = self.scsynth.clone();
-        future_to_promise(async move { to_js(&scsynth.status().await.map_err(js_error)?) })
+        future_to_promise(async move {
+            let status = scsynth.status().await.map_err(|error| js_error(&error))?;
+            to_js(&status)
+        })
     }
 
     /// Sends the bytes of a synth definition file: `/d_recv`.
@@ -282,7 +285,10 @@ impl ScsynthJs {
     ) -> Promise {
         let scsynth = self.scsynth.clone();
         future_to_promise(async move {
-            let group = scsynth.group(target_of(target)?).await.map_err(js_error)?;
+            let group = scsynth
+                .group(target_of(target)?)
+                .await
+                .map_err(|error| js_error(&error))?;
             Ok(group.0.into())
         })
     }
@@ -298,12 +304,12 @@ impl ScsynthJs {
     ) -> Promise {
         let scsynth = self.scsynth.clone();
         future_to_promise(async move {
-            let controls = controls_of(&controls).map_err(js_error)?;
+            let controls = controls_of(&controls).map_err(|error| JsError::new(&error))?;
             let target = target_of(target)?;
             let synth = scsynth
                 .synth(name, controls, target)
                 .await
-                .map_err(js_error)?;
+                .map_err(|error| js_error(&error))?;
             Ok(synth.0.into())
         })
     }
@@ -323,7 +329,7 @@ impl ScsynthJs {
         let controls = controls_of(controls).map_err(|error| JsError::new(&error))?;
         self.scsynth
             .set(NodeId(node), controls)
-            .map_err(|error| JsError::new(&error.to_string()))
+            .map_err(|error| js_error(&error))
     }
 
     /// Frees `node`: `/n_free`.
@@ -453,7 +459,7 @@ fn options_of(value: Option<JsValue>) -> Result<Options, JsError> {
 /// The target of the crate from a `Target` of JS.
 fn target_of(value: JsValue) -> Result<Target, JsValue> {
     let target = serde_wasm_bindgen::from_value(value)
-        .map_err(|error| js_error(format!("the target: {error}")))?;
+        .map_err(|error| JsError::new(&format!("the target: {error}")))?;
     Ok(match target {
         JsTarget::Head(node) => Target::head(NodeId(node)),
         JsTarget::Tail(node) => Target::tail(NodeId(node)),
@@ -506,17 +512,28 @@ fn message_of(incoming: &Incoming) -> Result<JsValue, JsValue> {
 /// scsynth-osc.
 fn to_js(value: &impl Serialize) -> Result<JsValue, JsValue> {
     let serializer = serde_wasm_bindgen::Serializer::new().serialize_missing_as_null(true);
-    value.serialize(&serializer).map_err(js_error)
+    value
+        .serialize(&serializer)
+        .map_err(|error| js_error(&error).into())
 }
 
 /// `undefined`, or the error as a JS `Error`.
 fn done(outcome: Result<(), scsynth_client::Error>) -> Result<JsValue, JsValue> {
-    outcome.map(|()| JsValue::UNDEFINED).map_err(js_error)
+    outcome
+        .map(|()| JsValue::UNDEFINED)
+        .map_err(|error| js_error(&error).into())
 }
 
-/// A JS `Error` with the text of `error`.
-fn js_error(error: impl Display) -> JsValue {
-    JsError::new(&error.to_string()).into()
+/// A JS `Error` with the text of `error`, then the text of each error of its
+/// `source` chain, each after a colon.
+fn js_error(error: &dyn Error) -> JsError {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text = format!("{text}: {cause}");
+        source = cause.source();
+    }
+    JsError::new(&text)
 }
 
 /// Reports an error of a callback to the console as an uncaught error,

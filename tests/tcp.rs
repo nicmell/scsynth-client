@@ -253,8 +253,7 @@ async fn a_client_dropped_inside_its_listener_ends_the_stream_of_the_peer() {
 #[tokio::test]
 async fn a_bad_length_gives_an_error_then_closed() {
     let negative = i32::MIN.to_be_bytes();
-    // One byte over 64 MiB.
-    let over = 0x0400_0001_i32.to_be_bytes();
+    let over = ((64_i32 << 20) + 1).to_be_bytes();
     for length in [negative, over] {
         let (client, mut peer) = connect().await;
         let mut events = listen(&client);

@@ -6,8 +6,10 @@ the replies of scsynth, over UDP, TCP, a websocket or a message port. It
 takes scsynth-osc and scsynth-synthdef by git tag. This file is the
 operating manual.
 
-The README is the reference of the crate. `docs/plan.md` will hold what is
-still open after version 0.1. Read the README before any work.
+The README is the reference of the crate. [docs/plan.md](docs/plan.md)
+holds what is still open after version 0.1: the requests, the ids, the
+transports, the buffers, what no test runs, the release and the note on
+sc-app3. Read both before any work.
 
 ## Ground rules
 
@@ -38,6 +40,10 @@ cargo deny check
 
 CI (`.github/workflows/ci.yml`) runs them with `--locked`. CI has no
 `cargo package` step, because the sibling crates are git dependencies.
+CI runs clippy on the newest stable Rust, which can have lints that the
+local one lacks. Before a push, also run the clippy commands with
+`--all-features` on the newest installed toolchain, such as
+`cargo +1.100.0 clippy`.
 
 The tests of `tests/scsynth.rs` are ignored by default, because they need
 a real scsynth. CI has no scsynth, so it does not run them. Run them by
@@ -54,8 +60,8 @@ That scsynth needs the running jackd. The README says what the tests use
 on the server, under Tests. After a failed run, restart that scsynth.
 
 `examples/bridge` is a crate of its own, with its own `Cargo.lock`, and
-the commands above do not reach it. Its commands, which the CI job
-`bridge` runs with `--locked`:
+the commands above do not reach it. Its commands, of which the CI job
+`bridge` runs the first three with `--locked`:
 
 ```bash
 cargo fmt --check --manifest-path examples/bridge/Cargo.toml

@@ -10,9 +10,8 @@ use tokio::net::{TcpStream, ToSocketAddrs};
 use crate::client::{ClientError, Event, Listener, OscClient, SendError};
 use crate::socket::{self, Reader, Tasks, Writer};
 
-/// The largest length of a packet that a [`TcpClient`] reads: 64 MiB.
-/// scsynth sets no such limit. The constant only guards against a stream
-/// that lost its framing, whose next 4 bytes are no length.
+/// The largest length of a packet that a [`TcpClient`] reads: 64 MiB, a
+/// limit of the client alone (see TCP in the README).
 const MAX_PACKET: usize = 64 << 20;
 
 /// The largest packet that a length of 32 bits frames: scsynth 3.14.1 reads
