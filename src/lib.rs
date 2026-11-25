@@ -4,6 +4,14 @@
     doc = "A client of scsynth, the synthesis server of SuperCollider. The README is its reference."
 )]
 
+mod channel;
+mod client;
+
+pub use channel::{ChannelClient, ChannelPeer};
+pub use client::{
+    ClientError, Event, Incoming, Listener, MaybeSend, MaybeSync, OscClient, SendError, decode,
+};
+
 /// The OSC protocol of scsynth: the types of the commands and the replies.
 pub use scsynth_osc;
 /// The synth definitions of SuperCollider: the definitions that scsynth loads.
