@@ -39,6 +39,20 @@ cargo deny check
 CI (`.github/workflows/ci.yml`) runs them with `--locked`. CI has no
 `cargo package` step, because the sibling crates are git dependencies.
 
+The tests of `tests/scsynth.rs` are ignored by default, because they need
+a real scsynth. CI has no scsynth, so it does not run them. Run them by
+hand against a scsynth of their own, with no JACK connection, and quit it
+after:
+
+```bash
+SC_JACK_DEFAULT_INPUTS="" SC_JACK_DEFAULT_OUTPUTS="" \
+  /Applications/SuperCollider.app/Contents/Resources/scsynth -u 57341 -t 57341 -B 127.0.0.1 &
+SCSYNTH_ADDR=127.0.0.1:57341 cargo test --all-features --test scsynth -- --ignored
+```
+
+That scsynth needs the running jackd. The README says what the tests use
+on the server, under Tests. After a failed run, restart that scsynth.
+
 ## Conventions
 
 - Edition 2024, MSRV 1.85, clippy pedantic, no unsafe code, docs on every

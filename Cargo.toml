@@ -35,6 +35,10 @@ required-features = ["tokio"]
 name = "tcp"
 required-features = ["tokio"]
 
+[[test]]
+name = "scsynth"
+required-features = ["tokio"]
+
 [package.metadata.docs.rs]
 all-features = true
 

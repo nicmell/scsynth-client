@@ -40,7 +40,9 @@ impl Scsynth {
     ///
     /// # Errors
     ///
-    /// As [`Self::request`]. [`Error::NoReply`] without a `/done /d_load`.
+    /// As [`Self::request`]: [`Error::Failed`] for a path where scsynth finds
+    /// no file, with the path as its message. [`Error::NoReply`] without a
+    /// `/done /d_load`.
     pub async fn load_synthdef(&self, path: impl Into<String>) -> Result<(), Error> {
         let command = Command::DLoad(DLoad {
             path: path.into(),

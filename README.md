@@ -415,6 +415,13 @@ for a client id under 0 or over 31, `register` sends `/notify 0`, so that
 scsynth does not keep the login. Then it gives `Error::NoNodeRange`,
 whatever scsynth answered, and the client is not registered.
 
+When the client id that `/notify` asks for is free, scsynth gives it.
+Else it gives the free id that waited longest: a freed id goes to the end
+of its list (`SC_SequencedCommand.cpp:1271`). One connection of scsynth
+3.14.1 that registered and unregistered four times got the ids 0, 1, 2
+and 3. So after 32 registrations, a client without `Options::client_id`
+can get an id over 31, even as the only client.
+
 Each registration starts fresh ranges, and `unregister` forgets them. The
 methods that take an id from the ranges of the client need `register`
 first: before it, they give `Error::NotRegistered`. When no free run that
@@ -527,11 +534,13 @@ So an awaited method settles at the `/synced` of its request, and needs
 no `/n_go`. scsynth sends the `/n_go` of a bundle before its `/synced`.
 So when `synth` or `group` gives `Ok`, the node exists.
 
-`query` takes the `/n_info` of its node among the replies, because a
-query of another client can put the `/n_info` of another node there.
-`get` takes the `/n_set` of its node, and `tree` the reply of its group.
-Without that reply, each one gives `Error::NoReply`. A client that is not
-registered gets no `/n_info`, so its `query` gives `Error::NoReply`.
+scsynth 3.14.1 also sends the `/n_info` of `/n_query` and the `/n_set`
+of `/s_get` before the `/synced` of their bundle. `query` takes the
+`/n_info` of its node among the replies, because a query of another
+client can put the `/n_info` of another node there. `get` takes the
+`/n_set` of its node, and `tree` the reply of its group. Without that
+reply, each one gives `Error::NoReply`. A client that is not registered
+gets no `/n_info`, so its `query` gives `Error::NoReply`.
 
 #### Set and map
 
@@ -571,10 +580,10 @@ gives as `Error::Failed`, with the message:
 scsynth runs `/d_recv`, `/d_load`, `/b_alloc`, `/b_allocRead` and
 `/b_free` asynchronously, and answers each one with a `/done` to its
 sender. scsynth 3.14.1 sends no reply at all for a `/b_alloc` that it
-cannot allocate, also for 0 frames (`SC_SequencedCommand.cpp:292-302`).
-The `/synced` of the request still comes. So each method that sends
-one of these commands needs its `/done` among the replies, and else gives
-`Error::NoReply`. The `/done` of a buffer command must name the buffer of
+cannot allocate (`SC_SequencedCommand.cpp:292-302`): it answered a
+`/b_alloc` of 0 frames with the `/synced` of the request alone. So each
+method that sends one of these commands needs its `/done` among the
+replies, and else gives `Error::NoReply`. The `/done` of a buffer command must name the buffer of
 the method. `read_buffer` needs the `/b_info` of its completion in place
 of the `/done`. `/d_free` is not asynchronous, and answers nothing, so
 `free_synthdef` needs no reply.
@@ -623,7 +632,9 @@ The traps:
   cannot see it. `SynthDef::wire_buffers` of scsynth-synthdef counts the
   wire buffers of a definition.
 - The path of `/d_load` is a path on the host of scsynth, which reads the
-  file.
+  file. For a path where it finds no file, scsynth 3.14.1 answers
+  `/fail /d_load` with the path as the message, and no `/done`.
+  `load_synthdef` gives it as `Error::Failed`.
 - scsynth 3.14.1 sends nothing for a `/d_free` of a name that it does not
   have. So `free_synthdef` gives `Ok` at the `/synced`.
 
@@ -662,7 +673,18 @@ nothing.
 no count is negative. scsynth sizes the reply of `/b_getn` by its count
 before it checks the run. A negative count makes it write outside its
 memory (see the traps of scsynth-osc). A value over `i32::MAX` goes as
-`i32::MAX`. The doc of `get_samples` gives the size limit of one reply.
+`i32::MAX`.
+
+The samples of `get_samples` come in one reply. scsynth builds a reply in
+65,516 bytes (`big_scpacket` of `common/scsynthsend.h`), and a datagram
+over IPv4 holds at most 65,507 bytes. scsynth raises the send buffer of
+its UDP socket (`SC_ComPort.cpp:268-281`). The limit of macOS on a
+datagram does not hold for its replies. So one reply of scsynth 3.14.1
+held at most 13,095 samples over UDP, and 13,098 over TCP. Over UDP, a
+larger reply does not leave scsynth, and `get_samples` gives
+`Error::NoReply`. Over TCP, scsynth answers
+`/fail /b_getn "buffer overflow"`, and `get_samples` gives it as
+`Error::Failed`.
 
 scsynth 3.14.1 runs the completion of `/b_allocRead` once it has read the
 file, then answers `/done`. So the `/b_info` of the buffer comes before
@@ -712,6 +734,39 @@ only a `request` of the caller with `/c_set` can take the `/fail` of a
 out of range, scsynth 3.14.1 answers `/fail /c_get "index out of range"`.
 `get_bus` gives it as `Error::Failed`. Without a `/c_set` that holds its
 index, `get_bus` gives `Error::NoReply`.
+
+## Tests
+
+The unit tests and the tests of `tests/` play scsynth in memory, or on
+the loopback address. `cargo test --all-features` runs them all.
+
+`tests/scsynth.rs` checks the client against a real scsynth. Each test
+proves one fact of scsynth 3.14.1 that this file states. Two tests go
+through every method of the client, one over UDP and one over TCP. These
+tests are ignored by default, and pass at once without `SCSYNTH_ADDR`.
+Run them against a scsynth on the same host, with the default counts of
+its flags, that no other client uses:
+
+```sh
+scsynth -u 57341 -t 57341 -B 127.0.0.1 &
+SCSYNTH_ADDR=127.0.0.1:57341 cargo test --all-features --test scsynth -- --ignored
+```
+
+The tests run in parallel, and each one closes its clients. On the
+server, they use:
+
+- the client ids 1 to 18, with the nodes, the buffers and the control
+  buses of their ranges
+- the nodes from 2,013,266,920 to 2,013,266,959, in the range of the
+  client id 30, with no registration
+- buffer 0, which a `/b_alloc` of buffer 99,999 writes, and which they
+  free
+- synth definitions whose names start with `scsynth-client-`
+
+No definition of the tests has an output, so no test makes a sound. The
+tests write a WAV file in the temporary directory, and remove it. A test
+that fails can leave its login in scsynth. Then a later run cannot get
+the client id that it asks for: restart scsynth after a failed run.
 
 ## License
 

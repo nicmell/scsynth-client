@@ -147,16 +147,17 @@ impl Scsynth {
     /// channels, frame after frame. A `start` over `i32::MAX` sends
     /// `i32::MAX`, which scsynth refuses.
     ///
-    /// One reply of scsynth holds at most 65,516 bytes (`big_scpacket` of
-    /// `common/scsynthsend.h` in 3.14.1), so about 13,000 samples. This
-    /// limit comes from the source, and is not measured yet.
+    /// One reply of scsynth 3.14.1 held at most 13,095 samples over UDP, and
+    /// 13,098 over TCP.
     ///
     /// # Errors
     ///
     /// [`Error::OutOfRange`] for a buffer id at or over
     /// [`Options::buffers`](crate::Options::buffers), with nothing sent, and
     /// else as [`Self::request`]. [`Error::NoReply`] without a `/b_setn` of
-    /// `buffer` that holds the run of `start`.
+    /// `buffer` that holds the run of `start`, as over UDP for more samples
+    /// than one reply holds. Over TCP, more samples give the
+    /// [`Error::Failed`] of `/fail /b_getn "buffer overflow"`.
     pub async fn get_samples(
         &self,
         buffer: BufferId,
