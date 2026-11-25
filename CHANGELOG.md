@@ -91,3 +91,6 @@ scsynth-synthdef 0.15.0 by git tag.
   global object, and `Scsynth::new` on `wasm32` with the feature `web`: a
   client with that timer. See
   [The timer of the browser](README.md#the-timer-of-the-browser).
+- `examples/bridge`, a program that lets a page reach scsynth: it pipes
+  each websocket to its own TCP connection to scsynth. See
+  [its README](examples/bridge/README.md).

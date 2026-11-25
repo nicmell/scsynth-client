@@ -269,7 +269,10 @@ too. At the `close` event of the socket, the listener gets
 
 scsynth has no websocket. So the other end of a `WebSocketClient` is a
 bridge: a program that carries each packet between the websocket and
-scsynth.
+scsynth. The repository has one in [`examples/bridge`](examples/bridge/README.md).
+It pipes each websocket to its own TCP connection to scsynth, and refuses
+the pages of the origins that it does not know. Its README gives its
+rules, and how to run it.
 
 ### Message ports
 

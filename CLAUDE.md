@@ -53,6 +53,24 @@ SCSYNTH_ADDR=127.0.0.1:57341 cargo test --all-features --test scsynth -- --ignor
 That scsynth needs the running jackd. The README says what the tests use
 on the server, under Tests. After a failed run, restart that scsynth.
 
+`examples/bridge` is a crate of its own, with its own `Cargo.lock`, and
+the commands above do not reach it. Its commands, which the CI job
+`bridge` runs with `--locked`:
+
+```bash
+cargo fmt --check --manifest-path examples/bridge/Cargo.toml
+cargo clippy --all-targets --manifest-path examples/bridge/Cargo.toml -- -D warnings
+cargo test --manifest-path examples/bridge/Cargo.toml
+cargo deny --manifest-path examples/bridge/Cargo.toml --config deny.toml check
+```
+
+Its test on a real scsynth is ignored by default too. Run it against a
+private scsynth, as above:
+
+```bash
+SCSYNTH_ADDR=127.0.0.1:57341 cargo test --manifest-path examples/bridge/Cargo.toml -- --ignored
+```
+
 ## Conventions
 
 - Edition 2024, MSRV 1.85, clippy pedantic, no unsafe code, docs on every
