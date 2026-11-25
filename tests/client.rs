@@ -476,6 +476,74 @@ fn register_on_a_registered_connection_without_a_limit_gives_the_fail() {
 }
 
 #[test]
+fn register_with_a_client_id_over_31_sends_notify_0_and_gives_no_node_range() {
+    let (scsynth, peer, _timer) = connect(Options::default());
+    let packets = serve(&peer, |command| match command {
+        Command::Notify(Notify { on: true, .. }) => vec![Reply::Done(Done::Notify {
+            client_id: 32,
+            max_logins: Some(64),
+        })],
+        other => answer(other),
+    });
+    assert_eq!(
+        now(scsynth.register()),
+        Err(Error::NoNodeRange { client_id: 32 })
+    );
+    assert_eq!(now(scsynth.close()), Ok(()));
+    assert_eq!(
+        all(&packets),
+        [
+            request(vec![notify(true, None)], 1),
+            request(vec![notify(false, None)], 2)
+        ]
+    );
+}
+
+#[test]
+fn register_with_a_client_id_under_0_gives_no_node_range_whatever_notify_0_answers() {
+    let (scsynth, peer, _timer) = connect(Options::default());
+    let packets = serve(&peer, |command| match command {
+        Command::Notify(Notify { on: true, .. }) => vec![Reply::Done(Done::Notify {
+            client_id: -1,
+            max_logins: Some(64),
+        })],
+        Command::Notify(Notify { on: false, .. }) => {
+            vec![fail("/notify", "not registered\n", None)]
+        }
+        other => answer(other),
+    });
+    assert_eq!(
+        now(scsynth.register()),
+        Err(Error::NoNodeRange { client_id: -1 })
+    );
+    assert_eq!(now(scsynth.close()), Ok(()));
+    assert_eq!(
+        all(&packets),
+        [
+            request(vec![notify(true, None)], 1),
+            request(vec![notify(false, None)], 2)
+        ]
+    );
+}
+
+#[test]
+fn the_options_default_to_the_flags_of_scsynth() {
+    assert_eq!(
+        Options::default(),
+        Options {
+            timeout: Duration::from_secs(3),
+            client_id: None,
+            max_logins: None,
+            buffers: 1024,
+            control_buses: 16384,
+            audio_buses: 1024,
+            inputs: 8,
+            outputs: 8,
+        }
+    );
+}
+
+#[test]
 fn unregister_sends_notify_0_and_the_client_forgets_its_registration() {
     let (scsynth, peer, _timer) = connect(Options::default());
     let packets = serve(&peer, answer);

@@ -18,8 +18,10 @@ scsynth-synthdef 0.15.0 by git tag.
   same call stack. See [The channel pair](README.md#the-channel-pair).
 - `Error`: why a request to scsynth gives no result: `Failed` with the
   `/fail` of scsynth, `Timeout`, `Send` with the `SendError` of the
-  transport, or `NoReply`: scsynth answered without the reply that the
-  method reads.
+  transport, `NoReply`: scsynth answered without the reply that the
+  method reads, `NotRegistered`: the method needs `register` first,
+  `NoNodeRange`: the client id has no range of node ids, or `Exhausted`:
+  no free id is left in the range of the client.
 - `Scsynth`: a client of scsynth over one transport, whose awaited methods
   wait for the answer of scsynth within a limit, one request in flight at
   a time. `with_timer`, `timeout`, `send`, `request`, `sync`, `status`,
@@ -29,6 +31,11 @@ scsynth-synthdef 0.15.0 by git tag.
 - `Subscription`: every event of the transport, after the client used it.
   See [Subscriptions](README.md#subscriptions).
 - `Options`: the limit of the awaited methods, the client id to ask for,
-  and the login limit of the server. See [Options](README.md#options).
+  the login limit of the server, and its counts of buffers, control
+  buses, audio buses, inputs and outputs. See [Options](README.md#options).
+- The ids of a registered client: its node ids, buffers, control buses
+  and audio buses, in the ranges that sclang gives to the same client id.
+  `register` refuses a client id under 0 or over 31. `IdKind` names the
+  kind of a range. See [The ids](README.md#the-ids).
 - `Timer` and `Sleep`: the clock that the awaited methods race against
   their limit.

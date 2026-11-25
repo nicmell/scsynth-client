@@ -8,6 +8,7 @@ mod channel;
 mod client;
 mod core;
 mod error;
+mod ids;
 mod options;
 mod scsynth;
 mod timer;
@@ -18,6 +19,7 @@ pub use client::{
     ClientError, Event, Incoming, Listener, MaybeSend, MaybeSync, OscClient, SendError, decode,
 };
 pub use error::Error;
+pub use ids::IdKind;
 pub use options::Options;
 pub use scsynth::{Registration, Scsynth, Subscription};
 pub use timer::{Sleep, Timer};

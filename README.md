@@ -244,9 +244,63 @@ every case. If `unregister` failed, `close` gives its error.
 | --- | --- | --- |
 | `timeout` | the limit of each awaited method | 3 seconds |
 | `client_id` | the client id that `register` asks for | `None`: scsynth picks one |
-| `max_logins` | the login limit of the server, its `-l`, for a reply of `/notify` that does not give it | `None` |
+| `max_logins` | the login limit that scsynth reports in the reply of `/notify`, for a reply that does not give it | `None` |
+| `buffers` | the number of buffers of the server, its `-b` | 1024 |
+| `control_buses` | the number of control buses of the server, its `-c` | 16384 |
+| `audio_buses` | the number of audio buses of the server, its `-a`, with the outputs and the inputs | 1024 |
+| `inputs` | the number of input buses of the server, its `-i` | 8 |
+| `outputs` | the number of output buses of the server, its `-o` | 8 |
 
 A caller writes `Options { timeout, ..Options::default() }`.
+
+scsynth reports its `-l` rounded up to a power of two: scsynth 3.14.1
+started with `-l 3` answered a limit of 4. So `max_logins` is then 4: with
+3, the ranges of ids of two clients overlap.
+
+The defaults of the five counts are those of scsynth. scsynth tells no
+client its counts: no reply gives them. So they must match the flags of
+the server. scsynth does not refuse an id over its counts: scsynth 3.14.1
+with 1,024 buffers answered `/b_alloc 99999` with `/done /b_alloc 99999`,
+and wrote buffer 0. sclang boots scsynth with `-i 2 -o 2` by default, so a
+client that shares such a server sets `inputs` and `outputs` to 2.
+
+### The ids
+
+A registered client takes the ids of its nodes, its buffers and its buses
+from ranges of its own. The ranges are those that sclang 3.14.1 gives to
+the same client id under the same login limit. So the client can share a
+scsynth with sclang, and with other clients of this crate. For the client
+id `N` and the login limit `L`:
+
+| Ids | Range | Next id |
+| --- | --- | --- |
+| nodes | `N << 26` to `(N << 26) + 0x03FF_FFFF` | from `(N << 26) + 1000`, up by one, then back to `(N << 26) + 1000` after the last |
+| buffers | `s` ids from `s * N`, with `s = buffers / L` | the first free run that fits, lowest index first |
+| control buses | `s` ids from `s * N`, with `s = control_buses / L` | the first free run that fits, lowest index first |
+| audio buses | `s` ids from `f + s * N`, with `f = outputs + inputs` and `s = (audio_buses - f) / L` | the first free run that fits, lowest index first |
+
+The divisions round down. The audio buses under `outputs + inputs` are the
+outputs and the inputs of the hardware, and no client takes them. A login
+limit of 0 or less, or a share of 0, leaves a range empty. The reserved
+counts of sclang are 0 by default, and this client has none. A free gives
+a run back, and joins it with the free runs next to it. sclang picks among
+its free runs in another order, so only the ranges are shared.
+
+The login limit is the one of the `Registration`: the limit in the reply of
+`/notify`, else `Options::max_logins`. Neither is the `-l` of the server
+(see [Options](#options)).
+
+sclang and this crate split the node ids among 32 clients, 0 to 31.
+scsynth gives client ids under its login limit, which is 64 by default. So
+for a client id under 0 or over 31, `register` sends `/notify 0`, so that
+scsynth does not keep the login. Then it gives `Error::NoNodeRange`,
+whatever scsynth answered, and the client is not registered.
+
+Each registration starts fresh ranges, and `unregister` forgets them. The
+methods that take an id from the ranges of the client need `register`
+first: before it, they give `Error::NotRegistered`. When no free run that
+fits is left in a range, they give `Error::Exhausted`, with the `IdKind`
+of the range.
 
 ### Errors
 
@@ -256,6 +310,9 @@ A caller writes `Options { timeout, ..Options::default() }`.
 | `Error::Timeout` | the answer did not come within the limit |
 | `Error::Send` | the transport refused the packet, or it closed |
 | `Error::NoReply` | scsynth answered without the reply, or the value of a reply, that the method reads |
+| `Error::NotRegistered` | the method needs `register` first |
+| `Error::NoNodeRange` | the client id that scsynth gave has no range of node ids: it is under 0 or over 31 |
+| `Error::Exhausted` | no free id is left in the range of the client, for the `IdKind` that it holds |
 
 A close of the transport settles every pending call with
 `Error::Send(SendError::Closed)`, and each call after it gets the same

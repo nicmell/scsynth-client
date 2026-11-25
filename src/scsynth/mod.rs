@@ -1,16 +1,18 @@
 use std::collections::{HashMap, VecDeque};
 use std::mem;
+use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use scsynth_osc::command::top_level::Notify;
 use scsynth_osc::reply::command_replies::Done;
 use scsynth_osc::reply::top_level::{StatusReply, VersionReply};
-use scsynth_osc::{Command, Packet, Reply};
+use scsynth_osc::{Command, NodeId, Packet, Reply};
 
 use crate::client::{Event, OscClient, SendError};
 use crate::core::{Core, Effect, RequestId, Wait};
 use crate::error::Error;
+use crate::ids::{IdKind, Ids};
 use crate::options::Options;
 use crate::timer::Timer;
 use crate::wait::{self, Raced, Receiver, Sender, Writer};
@@ -62,6 +64,8 @@ struct State {
     /// Whether scsynth holds a login for this connection, as far as the
     /// client knows.
     registered: bool,
+    /// The ids of the client, from its last registration.
+    ids: Option<Ids>,
     /// Whether the transport closed.
     closed: bool,
 }
@@ -107,6 +111,7 @@ impl Scsynth {
             calls: HashMap::new(),
             subscriptions: Vec::new(),
             registered: false,
+            ids: None,
             closed: false,
         };
         let shared = Arc::new(Shared {
@@ -225,15 +230,35 @@ impl Scsynth {
     /// The login limit comes from the reply, else from
     /// [`Options::max_logins`]. A connection that scsynth already registered
     /// gets a `/fail` with its client id: with [`Options::max_logins`], that
-    /// is a registration too.
+    /// is a registration too. Each registration gives the client fresh
+    /// ranges of ids, from its client id, its login limit and the counts of
+    /// its [`Options`].
     ///
     /// # Errors
     ///
     /// As [`Self::request`]: [`Error::Failed`] for an already registered
     /// connection when [`Options::max_logins`] is `None`. [`Error::NoReply`]
     /// when the reply of `/notify` is missing, or has no login limit and
-    /// [`Options::max_logins`] is `None`.
+    /// [`Options::max_logins`] is `None`. [`Error::NoNodeRange`] for a client
+    /// id under 0 or over 31, after a request of `/notify 0`, whatever its
+    /// answer: the client is then not registered.
     pub async fn register(&self) -> Result<Registration, Error> {
+        let registration = self.login().await?;
+        let client_id = registration.client_id;
+        let options = &self.shared.options;
+        let Some(ids) = Ids::new(client_id, registration.max_logins, options) else {
+            let _ = self.unregister().await;
+            let mut state = self.shared.lock();
+            state.registered = false;
+            state.ids = None;
+            return Err(Error::NoNodeRange { client_id });
+        };
+        self.shared.lock().ids = Some(ids);
+        Ok(registration)
+    }
+
+    /// Sends `/notify 1`, and reads the registration in its answer.
+    async fn login(&self) -> Result<Registration, Error> {
         let options = &self.shared.options;
         let notify = Notify {
             on: true,
@@ -267,7 +292,7 @@ impl Scsynth {
     }
 
     /// Ends the registration of this client: a request of `/notify 0`. The
-    /// client forgets its registration once scsynth answers.
+    /// client forgets its registration and its ids once scsynth answers.
     ///
     /// # Errors
     ///
@@ -280,7 +305,9 @@ impl Scsynth {
         };
         let outcome = self.request(vec![Command::Notify(notify)]).await;
         if matches!(outcome, Ok(_) | Err(Error::Failed { .. })) {
-            self.shared.lock().registered = false;
+            let mut state = self.shared.lock();
+            state.registered = false;
+            state.ids = None;
         }
         outcome.map(drop)
     }
@@ -322,6 +349,63 @@ impl Scsynth {
         let call = self.shared.start(|core| core.wait(wait));
         self.send(&Packet::Message(command))?;
         call.outcome(self.limit).await
+    }
+
+    /// The next node id of the client, in its range.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotRegistered`] before [`Self::register`].
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "step 5, the node methods, is its first caller")
+    )]
+    pub(crate) fn next_node_id(&self) -> Result<NodeId, Error> {
+        self.with_ids(|ids| Ok(ids.next_node()))
+    }
+
+    /// The first id of a run of `count` free ids of `kind` in the range of
+    /// the client, which it now holds.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotRegistered`] before [`Self::register`], and
+    /// [`Error::Exhausted`] when no such run is free.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "step 6, the buffer and bus methods, is its first caller"
+        )
+    )]
+    pub(crate) fn alloc_ids(&self, kind: IdKind, count: NonZeroU32) -> Result<i32, Error> {
+        self.with_ids(|ids| ids.alloc(kind, count))
+    }
+
+    /// Gives back the run of ids of `kind` that starts at `first`. Nothing
+    /// changes when the client holds no run that starts there.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotRegistered`] before [`Self::register`].
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "step 6, the buffer and bus methods, is its first caller"
+        )
+    )]
+    pub(crate) fn free_ids(&self, kind: IdKind, first: i32) -> Result<(), Error> {
+        self.with_ids(|ids| {
+            ids.free(kind, first);
+            Ok(())
+        })
+    }
+
+    fn with_ids<R>(&self, use_ids: impl FnOnce(&mut Ids) -> Result<R, Error>) -> Result<R, Error> {
+        let mut state = self.shared.lock();
+        let ids = state.ids.as_mut().ok_or(Error::NotRegistered)?;
+        use_ids(ids)
     }
 }
 
@@ -511,5 +595,81 @@ fn already_registered(error: &Error) -> Option<i32> {
             value: Some(client_id),
         } if address == "/notify" && message.starts_with(ALREADY_REGISTERED) => Some(*client_id),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::{self, Future};
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    use super::*;
+    use crate::channel::ChannelClient;
+    use crate::client::Incoming;
+    use crate::timer::Sleep;
+
+    /// A timer whose sleeps never end.
+    struct Never;
+
+    impl Timer for Never {
+        fn sleep(&self, _limit: Duration) -> Sleep {
+            Box::pin(future::pending())
+        }
+    }
+
+    fn now<F: Future>(future: F) -> F::Output {
+        match pin!(future).poll(&mut Context::from_waker(Waker::noop())) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("the future is pending"),
+        }
+    }
+
+    /// A client of a scsynth that registers it with the id 1 under a limit
+    /// of 4 logins.
+    fn client() -> Scsynth {
+        let (client, peer) = ChannelClient::pair();
+        peer.on_packet(|peer, packet| {
+            for command in packet.into_messages() {
+                let reply = match command {
+                    Command::Sync(id) => Reply::Synced(id),
+                    Command::Notify(Notify { on: true, .. }) => Reply::Done(Done::Notify {
+                        client_id: 1,
+                        max_logins: Some(4),
+                    }),
+                    Command::Notify(_) => Reply::Done(Done::NotifyOff),
+                    _ => continue,
+                };
+                peer.send(Incoming::Reply(reply));
+            }
+        });
+        Scsynth::with_timer(client, Never, Options::default())
+    }
+
+    #[test]
+    fn the_ids_need_a_registration_and_each_one_starts_fresh_ranges() {
+        let scsynth = client();
+        let one = NonZeroU32::MIN;
+        let four = NonZeroU32::new(4).expect("a count over 0");
+        assert_eq!(scsynth.next_node_id(), Err(Error::NotRegistered));
+        assert_eq!(
+            scsynth.alloc_ids(IdKind::Buffer, one),
+            Err(Error::NotRegistered)
+        );
+        assert_eq!(
+            scsynth.free_ids(IdKind::Buffer, 256),
+            Err(Error::NotRegistered)
+        );
+        for _ in 0..2 {
+            assert!(now(scsynth.register()).is_ok());
+            assert_eq!(scsynth.next_node_id(), Ok(NodeId((1 << 26) + 1000)));
+            assert_eq!(scsynth.alloc_ids(IdKind::Buffer, one), Ok(256));
+            assert_eq!(scsynth.alloc_ids(IdKind::ControlBus, four), Ok(4096));
+            assert_eq!(scsynth.alloc_ids(IdKind::AudioBus, four), Ok(268));
+            assert_eq!(scsynth.free_ids(IdKind::AudioBus, 268), Ok(()));
+            assert_eq!(scsynth.alloc_ids(IdKind::AudioBus, one), Ok(268));
+            assert_eq!(now(scsynth.unregister()), Ok(()));
+            assert_eq!(scsynth.next_node_id(), Err(Error::NotRegistered));
+        }
     }
 }
