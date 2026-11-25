@@ -102,6 +102,15 @@ const ALREADY_REGISTERED: &str = "notify: already registered";
 
 impl Scsynth {
     /// A client over `client`, whose awaited methods race the sleeps of
+    /// [`TokioTimer`](crate::TokioTimer): [`Self::with_timer`] with that
+    /// timer. It sets the listener of `client`.
+    #[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
+    #[must_use]
+    pub fn new(client: impl OscClient, options: Options) -> Self {
+        Self::with_timer(client, crate::timer::TokioTimer, options)
+    }
+
+    /// A client over `client`, whose awaited methods race the sleeps of
     /// `timer`. It sets the listener of `client`.
     #[must_use]
     #[cfg_attr(

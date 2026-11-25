@@ -11,7 +11,13 @@ mod error;
 mod ids;
 mod options;
 mod scsynth;
+#[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
+mod socket;
+#[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
+mod tcp;
 mod timer;
+#[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
+mod udp;
 mod wait;
 
 pub use channel::{ChannelClient, ChannelPeer};
@@ -22,7 +28,13 @@ pub use error::Error;
 pub use ids::IdKind;
 pub use options::Options;
 pub use scsynth::{Registration, Scsynth, Subscription, Target};
+#[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
+pub use tcp::TcpClient;
+#[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
+pub use timer::TokioTimer;
 pub use timer::{Sleep, Timer};
+#[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
+pub use udp::{DEFAULT_MAX_DATAGRAM, UdpClient};
 
 /// The OSC protocol of scsynth: the types of the commands and the replies.
 pub use scsynth_osc;

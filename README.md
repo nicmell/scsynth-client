@@ -118,6 +118,117 @@ assert!(peer.is_closed());
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+## The transports of tokio
+
+With the feature `tokio`, on a native target, the crate has two transports
+over the sockets of tokio: `UdpClient` and `TcpClient`. Each one runs a
+reader task and a writer task. So its `connect` must run inside a runtime
+of tokio.
+
+- `send` encodes the packet, hands its bytes to the writer task, and
+  returns. It waits for no network.
+- Only the reader task calls the listener, one event at a time, with no
+  lock held. So the listener can call `send`, `listen` and `close`. The
+  events that arrive before `listen` wait in the reader task, and come at
+  `listen`, in order.
+- `close` stops both tasks, and closes the socket. The writer task first
+  writes the packets that `send` queued before the close. The listener
+  gets `Event::Closed` once. Then `send` gives `SendError::Closed`, and a
+  second `close` does nothing.
+- A client that drops closes as `close` does. It can drop inside its own
+  listener, because the drop waits for no task.
+
+### UDP
+
+`UdpClient::connect(addr)` binds port 0 of the unspecified address of the
+family of `addr`, and connects to `addr`. Each packet is one datagram,
+each way. A datagram from scsynth comes as its messages, in order. Bytes
+that are no OSC packet come as an `Event::Error` with
+`ClientError::Decode`. The client receives into a buffer of 65,535 bytes.
+
+`send` refuses a packet over the largest datagram with
+`SendError::TooLarge`, and nothing leaves. The largest datagram is
+`DEFAULT_MAX_DATAGRAM`, 8,192 bytes, unless
+`UdpClient::connect_with_max_datagram` sets another. The system has a
+limit of its own: macOS refused a datagram of 9,316 bytes and sent one of
+9,016, and its `sysctl net.inet.udp.maxdgram` is 9,216.
+
+An I/O error of a send or of a receive comes as an `Event::Error` with
+`ClientError::Transport`, and the client goes on. On a connected UDP
+socket, a scsynth that does not run answers "connection refused", and
+scsynth can come back on the same port.
+
+### TCP
+
+`TcpClient::connect(addr)` connects a TCP stream to `addr`, with
+`TCP_NODELAY` on. scsynth 3.14.1, started with `-t`, frames each packet
+with its length: 32 bits in network byte order before the packet, each
+way. The client writes the length and the packet in one write. It reads a
+packet that arrives in any pieces, and one read can hold several packets.
+scsynth 3.14.1 took a packet of 60,016 bytes over TCP, and `send` sets no
+size limit of its own. It refuses only a packet over `i32::MAX` bytes,
+with `SendError::TooLarge`: scsynth reads the length as a signed integer
+(`SC_ComPort.cpp:368`).
+
+A length that is negative or over 64 MiB comes as an `Event::Error`, and
+then the client closes: after it, the stream cannot be read. scsynth sets
+no such limit. The limit only guards against a stream that lost its
+framing. An I/O error of a read or of a write also comes as an
+`Event::Error`, and then the client closes. The end of the stream from
+scsynth closes the client too.
+
+A TCP connection that closes keeps its login in scsynth: see `close` in
+[The methods](#the-methods).
+
+scsynth takes `-u` and `-t` with the same port number: scsynth 3.14.1
+answered over UDP and over TCP on one number.
+
+### The timer of tokio
+
+`TokioTimer` is a `Timer` whose sleeps are those of `tokio::time::sleep`.
+`Scsynth::new(client, options)` is
+`Scsynth::with_timer(client, TokioTimer, options)`. The runtime that polls
+the awaited methods needs the time driver of tokio, which `enable_time` or
+`enable_all` turns on. `#[tokio::main]` and `#[tokio::test]` turn it on.
+
+### A session over UDP
+
+```rust,no_run
+use scsynth_client::scsynth_osc::{ControlSetting, NodeId};
+use scsynth_client::scsynth_synthdef::{Arg, SynthDefBuilder};
+use scsynth_client::{Error, Options, Scsynth, Target, UdpClient};
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = UdpClient::connect("127.0.0.1:57110").await?;
+    let scsynth = Scsynth::new(client, Options::default());
+    scsynth.register().await?;
+
+    // SynthDef(\sine, { |freq = 440| Out.ar(0, SinOsc.ar(freq)) })
+    let mut builder = SynthDefBuilder::new("sine", vec![Arg::new("freq", 440.0)])?;
+    let freq = builder.arguments()[0].clone();
+    let sine = builder.ugen("SinOsc", "ar", &[("freq", freq.into())])?;
+    builder.ugen("Out", "ar", &[("bus", 0.0.into()), ("channelsArray", sine.into())])?;
+    scsynth.add_synthdef(&builder.finish()?).await?;
+
+    let group = scsynth.group(Target::head(NodeId::ROOT)).await?;
+    let freq = ControlSetting::new("freq", 440.0);
+    let synth = scsynth.synth("sine", [freq], Target::tail(group)).await?;
+    scsynth.set(synth, [ControlSetting::new("freq", 660.0)])?;
+
+    // scsynth has no definition `missing`, and refuses the synth.
+    match scsynth.synth("missing", [], Target::tail(group)).await {
+        Err(Error::Failed { message, .. }) => println!("scsynth refused: {message}"),
+        Err(error) => return Err(error.into()),
+        Ok(node) => println!("{node:?} plays"),
+    }
+
+    scsynth.free(synth).await?;
+    scsynth.close().await?;
+    Ok(())
+}
+```
+
 ## The client
 
 `Scsynth` is a client of scsynth over one transport. Its awaited methods
@@ -130,9 +241,11 @@ transport `client`, and sets the listener of that transport. The `Timer`
 makes the sleeps that the awaited methods race against their limit: its
 `sleep(limit)` gives a `Sleep`, a future that ends at the end of the
 limit. The client needs no runtime of its own: whatever polls its futures
-and the sleeps of its timer runs it. The timers of the crate will come
-with its features `tokio` and `web`, which hold nothing yet. Until then,
-the caller writes its own timer.
+and the sleeps of its timer runs it. With the feature `tokio`,
+`Scsynth::new` takes the timer of tokio (see
+[The timer of tokio](#the-timer-of-tokio)). The timer of the web will come
+with the feature `web`, which holds nothing yet. On another runtime, the
+caller writes its own timer.
 
 ```rust
 use std::future;
@@ -234,9 +347,12 @@ takes that as a registration. Without it, `register` gives the
 `Error::Failed`. `unregister` makes the client forget its registration
 once scsynth answers.
 
-A closed TCP connection keeps its login in scsynth. So `close`
-unregisters a registered client first. Then it closes the transport in
-every case. If `unregister` failed, `close` gives its error.
+A TCP connection that closed without `/notify 0` keeps its login in
+scsynth: with a limit of 4 logins, scsynth 3.14.1 answered the fifth
+registration with "too many users". So `close` unregisters a registered
+client first. Then it closes the transport in every case. If `unregister`
+failed, `close` gives its error. A client whose last handle drops closes
+its transport with no `/notify 0`: call `close` first.
 
 ### Options
 

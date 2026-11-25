@@ -69,3 +69,13 @@ scsynth-synthdef 0.15.0 by git tag.
   give them back, with no message to scsynth. `set_bus` is a plain send of
   `/c_set`, and `get_bus` a request of `/c_get`. See
   [Buses](README.md#buses).
+- The feature `tokio`, on a native target: `UdpClient` and `TcpClient`,
+  transports over the sockets of tokio, each with a reader task and a
+  writer task. `UdpClient` sends one datagram for each packet, and refuses
+  one over `DEFAULT_MAX_DATAGRAM` (8,192 bytes) or the limit that
+  `connect_with_max_datagram` sets. `TcpClient` writes the length of each
+  packet before it, as scsynth reads with `-t`. It closes on a length
+  that is negative or over 64 MiB. See
+  [The transports of tokio](README.md#the-transports-of-tokio).
+- `TokioTimer`, the `Timer` of tokio, and `Scsynth::new`: a client with
+  that timer. See [The timer of tokio](README.md#the-timer-of-tokio).
