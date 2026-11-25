@@ -172,11 +172,6 @@ and its client ids, and the failures.
   commands before it. So a `read_buffer` of a large file, from any client,
   can hold the `/synced` of a request past its limit.
 
-## Left to the owner
-
-- The release of 0.1.0: the date of its section in the CHANGELOG, and the
-  tag `v0.1.0`.
-
 ## sc-app3
 
 sc-app3 does not take this crate. Its pump talks to scsynth over UDP, from

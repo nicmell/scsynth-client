@@ -8,7 +8,7 @@ operating manual.
 
 The README is the reference of the crate. [docs/plan.md](docs/plan.md)
 holds what is still open after version 0.1: the requests, the ids, the
-transports, the buffers, what no test runs, the release and the note on
+transports, the buffers, other servers, what no test runs and the note on
 sc-app3. Read both before any work.
 
 ## Ground rules
@@ -108,3 +108,4 @@ Then open `http://localhost:5199` and connect to `ws://127.0.0.1:57342`.
 - Work goes on a branch, with one commit per step of the plan. Every commit
   leaves fmt, clippy, the tests and the docs green. A branch reaches `main`
   through a GitHub PR.
+- A release adds its section to `CHANGELOG.md` and gets its tag.

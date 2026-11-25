@@ -11,7 +11,18 @@ synth definitions. This crate re-exports both, as
 
 The crate follows scsynth 3.14.1. Each fact of scsynth that this file
 states comes from the source of scsynth, or from a measurement with it.
-Version 0.1.0 is not released yet.
+
+Version 0.1.0 is the tag `v0.1.0` of the repository. The crate is not on
+crates.io, because it takes scsynth-osc and scsynth-synthdef by git tag.
+A project takes it by git tag too:
+
+```toml
+[dependencies]
+scsynth-client = { git = "https://github.com/nicmell/scsynth-client", tag = "v0.1.0", version = "0.1.0", features = ["tokio"] }
+```
+
+The features follow the target: `tokio` on a native target, `web` on
+`wasm32`, and `serde` on either (see [Features](#features)).
 
 ## A session
 

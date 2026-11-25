@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-25)
 
 The first release: a client of scsynth 3.14.1. Its awaited methods wait
 for the replies of scsynth within a limit, one request in flight at a
