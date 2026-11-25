@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>scsynth-client in a page</title>
+  </head>
+  <body>
+    <main>
+      <h1>scsynth-client in a page</h1>
+      <p>
+        The <code>Scsynth</code> client of scsynth-client, compiled to wasm, reaches a scsynth
+        through the websocket bridge of the repository. Each request shows its time to settle,
+        each refusal its text, and each message of scsynth its serde form.
+      </p>
+      <div class="controls">
+        <label>Bridge <input id="url" value="ws://127.0.0.1:57120" size="28" /></label>
+        <label>
+          Transport
+          <select id="transport">
+            <option value="websocket">websocket</option>
+            <option value="worker">worker port</option>
+            <option value="object">own client</option>
+          </select>
+        </label>
+        <button id="connect">Connect</button>
+        <button id="disconnect" disabled>Disconnect</button>
+        <span id="state">disconnected</span>
+      </div>
+      <div class="controls">
+        <button id="play" disabled>Play</button>
+        <label>
+          Frequency
+          <input id="freq" type="range" min="110" max="880" step="1" value="440" disabled />
+          <output id="freq-value">440</output> Hz
+        </label>
+        <button id="stop" disabled>Stop</button>
+        <button id="missing" disabled>Missing</button>
+      </div>
+      <ol id="log"></ol>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

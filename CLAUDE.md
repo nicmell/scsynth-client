@@ -6,8 +6,10 @@ the replies of scsynth, over UDP, TCP, a websocket or a message port. It
 takes scsynth-osc and scsynth-synthdef by git tag. This file is the
 operating manual.
 
-The README is the reference of the crate. `docs/plan.md` will hold what is
-still open after version 0.1. Read the README before any work.
+The README is the reference of the crate. [docs/plan.md](docs/plan.md)
+holds what is still open after version 0.1: the requests, the ids, the
+transports, the buffers, other servers, what no test runs and the note on
+sc-app3. Read both before any work.
 
 ## Ground rules
 
@@ -38,6 +40,62 @@ cargo deny check
 
 CI (`.github/workflows/ci.yml`) runs them with `--locked`. CI has no
 `cargo package` step, because the sibling crates are git dependencies.
+CI runs clippy on the newest stable Rust, which can have lints that the
+local one lacks. Before a push, also run the clippy commands with
+`--all-features` on the newest installed toolchain, such as
+`cargo +1.100.0 clippy`.
+
+The tests of `tests/scsynth.rs` are ignored by default, because they need
+a real scsynth. CI has no scsynth, so it does not run them. Run them by
+hand against a scsynth of their own, with no JACK connection, and quit it
+after:
+
+```bash
+SC_JACK_DEFAULT_INPUTS="" SC_JACK_DEFAULT_OUTPUTS="" \
+  /Applications/SuperCollider.app/Contents/Resources/scsynth -u 57341 -t 57341 -B 127.0.0.1 &
+SCSYNTH_ADDR=127.0.0.1:57341 cargo test --all-features --test scsynth -- --ignored
+```
+
+That scsynth needs the running jackd. The README says what the tests use
+on the server, under Tests. After a failed run, restart that scsynth.
+
+`examples/bridge` is a crate of its own, with its own `Cargo.lock`, and
+the commands above do not reach it. Its commands, of which the CI job
+`bridge` runs the first three with `--locked`:
+
+```bash
+cargo fmt --check --manifest-path examples/bridge/Cargo.toml
+cargo clippy --all-targets --manifest-path examples/bridge/Cargo.toml -- -D warnings
+cargo test --manifest-path examples/bridge/Cargo.toml
+cargo deny --manifest-path examples/bridge/Cargo.toml --config deny.toml check
+```
+
+Its test on a real scsynth is ignored by default too. Run it against a
+private scsynth, as above:
+
+```bash
+SCSYNTH_ADDR=127.0.0.1:57341 cargo test --manifest-path examples/bridge/Cargo.toml -- --ignored
+```
+
+`examples/vite` is the Vite page, with its wasm crate in
+`examples/vite/wasm`, which has its own `Cargo.lock`. Its commands, which
+the CI job `example` runs with `--locked`:
+
+```bash
+cargo fmt --check --manifest-path examples/vite/wasm/Cargo.toml
+cargo clippy --manifest-path examples/vite/wasm/Cargo.toml --target wasm32-unknown-unknown -- -D warnings
+cd examples/vite && npm ci && npm run wasm && npm run build
+```
+
+The page plays a sine. Run it against a private scsynth with no JACK
+connection, as above, with `-l 32`, through the bridge:
+
+```bash
+cargo run --manifest-path examples/bridge/Cargo.toml -- --scsynth 127.0.0.1:57341 --listen 127.0.0.1:57342 --origin http://localhost:5199
+cd examples/vite && npm run dev -- --port 5199 --strictPort
+```
+
+Then open `http://localhost:5199` and connect to `ws://127.0.0.1:57342`.
 
 ## Conventions
 
@@ -50,3 +108,4 @@ CI (`.github/workflows/ci.yml`) runs them with `--locked`. CI has no
 - Work goes on a branch, with one commit per step of the plan. Every commit
   leaves fmt, clippy, the tests and the docs green. A branch reaches `main`
   through a GitHub PR.
+- A release adds its section to `CHANGELOG.md` and gets its tag.

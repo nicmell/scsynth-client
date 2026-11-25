@@ -15,10 +15,44 @@ categories = ["multimedia::audio", "network-programming", "asynchronous", "wasm"
 scsynth-osc = { git = "https://github.com/nicmell/scsynth-osc", tag = "v0.2.1", version = "0.2.1" }
 scsynth-synthdef = { git = "https://github.com/nicmell/scsynth-synthdef", tag = "v0.15.0", version = "0.15.0" }
 
+# The sockets of tokio do not compile for wasm32, where `--all-features` must still build.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.54.1", optional = true, default-features = false, features = ["net", "rt", "sync", "time"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1.54.1", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+
+# The feature `web` is empty on a native target, where `--all-features` must build without a browser.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { version = "0.3.106", optional = true, default-features = false }
+wasm-bindgen = { version = "0.2.129", optional = true }
+web-sys = { version = "0.3.106", optional = true, default-features = false, features = [
+    "BinaryType",
+    "CloseEvent",
+    "DedicatedWorkerGlobalScope",
+    "EventTarget",
+    "MessageEvent",
+    "MessagePort",
+    "WebSocket",
+    "Worker",
+] }
+
 [features]
-tokio = []
-web = []
+tokio = ["dep:tokio"]
+web = ["dep:js-sys", "dep:wasm-bindgen", "dep:web-sys"]
 serde = ["scsynth-osc/serde", "scsynth-synthdef/serde"]
+
+[[test]]
+name = "udp"
+required-features = ["tokio"]
+
+[[test]]
+name = "tcp"
+required-features = ["tokio"]
+
+[[test]]
+name = "scsynth"
+required-features = ["tokio"]
 
 [package.metadata.docs.rs]
 all-features = true
