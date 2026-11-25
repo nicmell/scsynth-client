@@ -672,8 +672,10 @@ another.
 
 An I/O error of a send or of a receive comes as an `Event::Error` with
 `ClientError::Transport`, and the client goes on. When no scsynth runs on
-the port, the system answers a datagram with "connection refused", and
-scsynth can come back on the same port.
+the port, the operating system can report a datagram to it as an error:
+macOS reported "connection refused". On the Linux runner of CI, no error
+came within 5 s. In both cases the client goes on, and scsynth can come
+back on the same port.
 
 #### TCP
 

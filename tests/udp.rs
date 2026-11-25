@@ -230,13 +230,18 @@ async fn close_gives_closed_once_and_then_send_refuses() {
     );
 }
 
-#[tokio::test]
-async fn a_closed_port_gives_an_error_and_the_client_goes_on_when_the_peer_comes_back() {
+/// A port on the loopback address that no socket holds.
+async fn closed_port() -> SocketAddr {
     let gone = UdpSocket::bind("127.0.0.1:0")
         .await
         .expect("a socket binds");
-    let addr = gone.local_addr().expect("the socket has an address");
-    drop(gone);
+    gone.local_addr().expect("the socket has an address")
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn macos_reports_a_send_to_a_closed_port_as_an_error() {
+    let addr = closed_port().await;
     let client = UdpClient::connect(addr).await.expect("the client connects");
     let mut events = listen(&client);
     client
@@ -249,10 +254,45 @@ async fn a_closed_port_gives_an_error_and_the_client_goes_on_when_the_peer_comes
         ),
         "an error of the transport"
     );
-    let peer = UdpSocket::bind(addr).await.expect("the peer binds again");
-    let to = address(&client, &peer).await;
+}
+
+#[tokio::test]
+async fn the_client_goes_on_after_a_send_to_a_closed_port_once_a_peer_binds_it() {
+    let addr = closed_port().await;
+    let client = UdpClient::connect(addr).await.expect("the client connects");
+    let mut events = listen(&client);
+    client
+        .send(&Packet::Message(Command::Status))
+        .expect("open");
+    let peer = UdpSocket::bind(addr)
+        .await
+        .expect("the peer binds the port");
+    // On the Linux runner of CI, no error came within 5 s of the first send:
+    // the test assumes neither an error nor its time, so it sends `/status`
+    // until one reaches the peer.
+    let mut buffer = vec![0; 65_535];
+    let mut to = None;
+    for _ in 0..50 {
+        client
+            .send(&Packet::Message(Command::Status))
+            .expect("open");
+        let received = timeout(Duration::from_millis(100), peer.recv_from(&mut buffer)).await;
+        if let Ok(received) = received {
+            to = Some(received.expect("the peer receives").1);
+            break;
+        }
+    }
+    let to = to.expect("a /status reaches the peer within 5 s");
     answer(&peer, &Packet::Message(synced(1)).encode(), to).await;
-    assert_eq!(next(&mut events).await, Some(message(synced(1))));
+    loop {
+        match next(&mut events).await {
+            Some(Event::Error(ClientError::Transport(_))) => {}
+            event => {
+                assert_eq!(event, Some(message(synced(1))));
+                break;
+            }
+        }
+    }
 }
 
 #[tokio::test]

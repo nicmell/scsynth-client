@@ -161,6 +161,8 @@ and its client ids, and the failures.
   the owner has no `wasm32` target. wasm-bindgen, js-sys and web-sys
   declare Rust 1.81.
 - A real scsynth in CI. `tests/scsynth.rs` runs by hand.
+- The error of a datagram to a closed UDP port on Linux: `tests/udp.rs`
+  checks it on macOS alone (see [UDP](../README.md#udp)).
 - The order of the replies on a network that reorders datagrams. UDP ran
   on the loopback address alone. A `/fail` that comes after the `/synced`
   of its request reaches no request, or the next one with the same
