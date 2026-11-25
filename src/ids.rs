@@ -94,19 +94,21 @@ impl Ids {
 }
 
 /// The share of the client `client_id` of the ids from `first` to `count`,
-/// split equally among `max_logins` clients. Empty when the share is 0, and
-/// when the range leaves `0..=i32::MAX`.
+/// split equally among `max_logins` clients. Empty when the share is 0, when
+/// it starts under 0, and when it ends over `count`, as the share of a
+/// client id at or over `max_logins` does.
 fn share(first: i64, count: i32, max_logins: i32, client_id: i32) -> Range<i32> {
     if max_logins <= 0 {
         return 0..0;
     }
     let share = (i64::from(count) - first) / i64::from(max_logins);
-    if share <= 0 {
+    let start = first + share * i64::from(client_id);
+    let end = start + share;
+    if share <= 0 || start < 0 || end > i64::from(count) {
         return 0..0;
     }
-    let start = first + share * i64::from(client_id);
-    match (i32::try_from(start), i32::try_from(start + share)) {
-        (Ok(start), Ok(end)) if start >= 0 => start..end,
+    match (i32::try_from(start), i32::try_from(end)) {
+        (Ok(start), Ok(end)) => start..end,
         _ => 0..0,
     }
 }
@@ -211,15 +213,15 @@ mod tests {
     }
 
     #[test]
-    fn the_buffers_of_the_clients_0_1_and_31() {
+    fn the_buffers_of_the_clients_0_1_and_the_last() {
         // Server.newBufferAllocators of Server.sc: `numBuffers div:
         // maxNumClients` for each client, from `numBuffersPerClient *
         // clientID`, with `reservedNumBuffers` 0.
         for (max_logins, ranges) in [
-            (32, [0..32, 32..64, 992..1024]),
-            (4, [0..256, 256..512, 7936..8192]),
+            (32, [(0, 0..32), (1, 32..64), (31, 992..1024)]),
+            (4, [(0, 0..256), (1, 256..512), (3, 768..1024)]),
         ] {
-            for (client_id, range) in [0, 1, 31].into_iter().zip(ranges) {
+            for (client_id, range) in ranges {
                 let mut ids = ids(client_id, max_logins);
                 assert_eq!(free_runs(&mut ids, IdKind::Buffer), [range]);
             }
@@ -227,15 +229,15 @@ mod tests {
     }
 
     #[test]
-    fn the_control_buses_of_the_clients_0_1_and_31() {
+    fn the_control_buses_of_the_clients_0_1_and_the_last() {
         // Server.newBusAllocators of Server.sc: `numControlBusChannels div:
         // maxNumClients` for each client, from `numControlPerClient *
         // clientID`, with `reservedNumControlBusChannels` 0.
         for (max_logins, ranges) in [
-            (32, [0..512, 512..1024, 15872..16384]),
-            (4, [0..4096, 4096..8192, 126_976..131_072]),
+            (32, [(0, 0..512), (1, 512..1024), (31, 15872..16384)]),
+            (4, [(0, 0..4096), (1, 4096..8192), (3, 12288..16384)]),
         ] {
-            for (client_id, range) in [0, 1, 31].into_iter().zip(ranges) {
+            for (client_id, range) in ranges {
                 let mut ids = ids(client_id, max_logins);
                 assert_eq!(free_runs(&mut ids, IdKind::ControlBus), [range]);
             }
@@ -243,20 +245,32 @@ mod tests {
     }
 
     #[test]
-    fn the_audio_buses_of_the_clients_0_1_and_31() {
+    fn the_audio_buses_of_the_clients_0_1_and_the_last() {
         // Server.newBusAllocators of Server.sc: `numAudioBusChannels -
         // firstPrivateBus div: maxNumClients` for each client, from
         // `numAudioPerClient * clientID + firstPrivateBus`, with
         // `firstPrivateBus` the outputs plus the inputs, and
         // `reservedNumAudioBusChannels` 0.
         for (max_logins, ranges) in [
-            (32, [16..47, 47..78, 977..1008]),
-            (4, [16..268, 268..520, 7828..8080]),
+            (32, [(0, 16..47), (1, 47..78), (31, 977..1008)]),
+            (4, [(0, 16..268), (1, 268..520), (3, 772..1024)]),
         ] {
-            for (client_id, range) in [0, 1, 31].into_iter().zip(ranges) {
+            for (client_id, range) in ranges {
                 let mut ids = ids(client_id, max_logins);
                 assert_eq!(free_runs(&mut ids, IdKind::AudioBus), [range]);
             }
+        }
+    }
+
+    #[test]
+    fn a_client_id_at_or_over_the_login_limit_has_no_buffers_and_no_buses() {
+        for client_id in [4, 31] {
+            let mut ids = ids(client_id, 4);
+            for kind in KINDS {
+                assert_eq!(free_runs(&mut ids, kind), []);
+                assert_eq!(ids.alloc(kind, count(1)), Err(Error::Exhausted(kind)));
+            }
+            assert_eq!(ids.next_node(), NodeId((client_id << NODE_SHIFT) + 1000));
         }
     }
 

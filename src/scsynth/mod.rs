@@ -17,6 +17,9 @@ use crate::options::Options;
 use crate::timer::Timer;
 use crate::wait::{self, Raced, Receiver, Sender, Writer};
 
+mod buffers;
+mod buses;
+mod defs;
 mod nodes;
 
 pub use nodes::Target;
@@ -348,6 +351,18 @@ impl Scsynth {
         Subscription { events }
     }
 
+    /// A request of the asynchronous `command`, whose replies must hold
+    /// `done`: else [`Error::NoReply`] for the address of `command`.
+    async fn request_done(&self, command: Command, done: Done) -> Result<Vec<Reply>, Error> {
+        let address = command.address();
+        let replies = self.request(vec![command]).await?;
+        if replies.contains(&Reply::Done(done)) {
+            Ok(replies)
+        } else {
+            Err(Error::NoReply { address })
+        }
+    }
+
     /// Waits for `wait`, and sends `command` as a plain send.
     async fn ask(&self, wait: Wait, command: Command) -> Result<Vec<Reply>, Error> {
         let call = self.shared.start(|core| core.wait(wait));
@@ -371,13 +386,6 @@ impl Scsynth {
     ///
     /// [`Error::NotRegistered`] before [`Self::register`], and
     /// [`Error::Exhausted`] when no such run is free.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "step 6, the buffer and bus methods, is its first caller"
-        )
-    )]
     pub(crate) fn alloc_ids(&self, kind: IdKind, count: NonZeroU32) -> Result<i32, Error> {
         self.with_ids(|ids| ids.alloc(kind, count))
     }
@@ -388,13 +396,6 @@ impl Scsynth {
     /// # Errors
     ///
     /// [`Error::NotRegistered`] before [`Self::register`].
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "step 6, the buffer and bus methods, is its first caller"
-        )
-    )]
     pub(crate) fn free_ids(&self, kind: IdKind, first: i32) -> Result<(), Error> {
         self.with_ids(|ids| {
             ids.free(kind, first);

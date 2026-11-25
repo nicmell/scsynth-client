@@ -281,7 +281,10 @@ id `N` and the login limit `L`:
 
 The divisions round down. The audio buses under `outputs + inputs` are the
 outputs and the inputs of the hardware, and no client takes them. A login
-limit of 0 or less, or a share of 0, leaves a range empty. The reserved
+limit of 0 or less, or a share of 0, leaves a range empty. A range that
+ends over the count of the server is empty too. Each range of a client id
+at or over the login limit is such a range. So each alloc there gives
+`Error::Exhausted`, and no id passes the count. The reserved
 counts of sclang are 0 by default, and this client has none. A free gives
 a run back, and joins it with the free runs next to it. sclang picks among
 its free runs in another order, so only the ranges are shared.
@@ -313,6 +316,9 @@ of the range.
 | `Error::NotRegistered` | the method needs `register` first |
 | `Error::NoNodeRange` | the client id that scsynth gave has no range of node ids: it is under 0 or over 31 |
 | `Error::Exhausted` | no free id is left in the range of the client, for the `IdKind` that it holds |
+| `Error::OutOfRange` | the id is at or over the count of its kind in the `Options`: the kind and the id |
+| `Error::Read` | the bytes are no synth definition file: the `ReadError` of scsynth-synthdef |
+| `Error::Limit` | the synth definition breaks a limit of scsynth: the `LimitError` of scsynth-synthdef |
 
 A close of the transport settles every pending call with
 `Error::Send(SendError::Closed)`, and each call after it gets the same
@@ -443,6 +449,153 @@ gives as `Error::Failed`, with the message:
 | `/s_new` with a node id in use | `duplicate node ID` |
 | `/s_new` with a target group 9999 that does not exist | `Group 9999 not found` |
 | `/n_free 9999` of a node that does not exist | `Node 9999 not found` |
+
+### Asynchronous commands
+
+scsynth runs `/d_recv`, `/d_load`, `/b_alloc`, `/b_allocRead` and
+`/b_free` asynchronously, and answers each one with a `/done` to its
+sender. scsynth 3.14.1 sends no reply at all for a `/b_alloc` that it
+cannot allocate, also for 0 frames (`SC_SequencedCommand.cpp:292-302`).
+The `/synced` of the request still comes. So each method that sends
+one of these commands needs its `/done` among the replies, and else gives
+`Error::NoReply`. The `/done` of a buffer command must name the buffer of
+the method. `read_buffer` needs the `/b_info` of its completion in place
+of the `/done`. `/d_free` is not asynchronous, and answers nothing, so
+`free_synthdef` needs no reply.
+
+### Synth definitions
+
+The definition methods send synth definitions to scsynth, and remove them.
+They take the `SynthDef` of scsynth-synthdef, which its `SynthDefBuilder`
+builds.
+
+| Method | Sends | Gives |
+| --- | --- | --- |
+| `add_synthdef(def)` | `/d_recv` with the bytes of `def`, through the queue | `()`, at the `/done /d_recv` |
+| `add_synthdef_bytes(bytes)` | `/d_recv` with `bytes`, through the queue, once they read as a definition file | `()`, at the `/done /d_recv` |
+| `load_synthdef(path)` | `/d_load`, through the queue | `()`, at the `/done /d_load` |
+| `free_synthdef(name)` | `/d_free` of one name, through the queue | `()` |
+
+`add_synthdef` writes the bytes with `SynthDef::as_bytes`. For a
+definition that breaks a limit of scsynth, it gives `Error::Limit` with
+the `LimitError` of scsynth-synthdef, and sends nothing.
+`add_synthdef_bytes` reads the bytes with `read_def_file` first. For bytes
+that are no definition file, it gives `Error::Read` with the `ReadError`
+of scsynth-synthdef, and sends nothing.
+
+```rust
+use scsynth_client::Scsynth;
+use scsynth_client::scsynth_synthdef::{Arg, SynthDefBuilder};
+
+/// Sends `SynthDef(\sine, { |freq = 440| Out.ar(0, SinOsc.ar(freq)) })`.
+async fn define(scsynth: &Scsynth) -> Result<(), Box<dyn std::error::Error>> {
+    let mut builder = SynthDefBuilder::new("sine", vec![Arg::new("freq", 440.0)])?;
+    let freq = builder.arguments()[0].clone();
+    let sine = builder.ugen("SinOsc", "ar", &[("freq", freq.into())])?;
+    builder.ugen("Out", "ar", &[("bus", 0.0.into()), ("channelsArray", sine.into())])?;
+    scsynth.add_synthdef(&builder.finish()?).await?;
+    Ok(())
+}
+```
+
+The traps:
+
+- scsynth 3.14.1 answers `/d_recv` with `/done /d_recv` also for bytes
+  that are no definition. So only the client can refuse them.
+- A definition that needs more wire buffers than the `-w` of scsynth also
+  gets `/done /d_recv`, and scsynth 3.14.1 does not load it. The client
+  cannot see it. `SynthDef::wire_buffers` of scsynth-synthdef counts the
+  wire buffers of a definition.
+- The path of `/d_load` is a path on the host of scsynth, which reads the
+  file.
+- scsynth 3.14.1 sends nothing for a `/d_free` of a name that it does not
+  have. So `free_synthdef` gives `Ok` at the `/synced`.
+
+### Buffers
+
+The buffer methods allocate, read, query and free the buffers of
+scsynth. They take and give the types of scsynth-osc: `BufferId`, and the
+`BufferInfo` of `reply::buffer`, which holds the buffer, its frames, its
+channels and its sample rate.
+
+| Method | Sends | Gives |
+| --- | --- | --- |
+| `alloc_buffer(frames, channels)` | `/b_alloc` with the next free buffer id, at the sample rate of the server, through the queue | the `BufferId`, at the `/done /b_alloc` of the buffer |
+| `read_buffer(path)` | one `/b_allocRead` of the whole file with the next free buffer id, with a `/b_query` of the buffer as its completion, through the queue | the `BufferInfo` of the buffer, from the `/b_info` of that query |
+| `free_buffer(buffer)` | `/b_free`, through the queue | `()`, at the `/done /b_free` of the buffer |
+| `query_buffer(buffer)` | `/b_query`, through the queue | the `BufferInfo` of the buffer, from its `/b_info` |
+| `get_samples(buffer, start, count)` | `/b_getn` of one run, through the queue | the values of the run, each an `f32`, from the `/b_setn` of the buffer |
+
+`alloc_buffer` and `read_buffer` take the next free buffer id of the
+client (see [The ids](#the-ids)). Before `register`, they give
+`Error::NotRegistered`, and send nothing. When the call fails or is
+dropped, the buffer id goes back to the client, and the next call can take
+it. If the client holds the buffer id, `free_buffer` gives it back at the
+`/done /b_free` of the buffer. On an error, the client keeps it.
+`free_buffer`,
+`query_buffer` and `get_samples` take any buffer id, and need no
+`register`.
+
+scsynth does not refuse a buffer id over its count (see
+[Options](#options)). So each method that takes a `BufferId` gives
+`Error::OutOfRange` for one at or over `Options::buffers`, and sends
+nothing.
+
+`alloc_buffer` takes its `frames` and its `channels` as `u32`, and
+`get_samples` takes its `start` as a `u32` and its `count` as a `u16`. So
+no count is negative. scsynth sizes the reply of `/b_getn` by its count
+before it checks the run. A negative count makes it write outside its
+memory (see the traps of scsynth-osc). A value over `i32::MAX` goes as
+`i32::MAX`. The doc of `get_samples` gives the size limit of one reply.
+
+scsynth 3.14.1 runs the completion of `/b_allocRead` once it has read the
+file, then answers `/done`. So the `/b_info` of the buffer comes before
+the `/synced`. For a file that it cannot open, scsynth 3.14.1 answers
+`/fail /b_allocRead "File '...' could not be opened: ...\n"` with the
+buffer as its value, and runs no completion. `read_buffer` then gives
+`Error::Failed`. Without a `/b_info` of the buffer, `read_buffer` gives
+`Error::NoReply`. `query_buffer` and `get_samples` take the reply of their
+buffer among the replies, and give `Error::NoReply` without it.
+
+The traps:
+
+- The path of a sound file is a path on the host of scsynth, which reads
+  the file.
+- scsynth 3.14.1 multiplies the frames by the channels of `/b_alloc` in
+  an `int` (`SC_World.cpp:1048`). A product over `i32::MAX` wraps. Then
+  scsynth fails to allocate, or allocates fewer samples than the frames
+  and the channels that it keeps for the buffer.
+
+### Buses
+
+A bus of scsynth is only an index: scsynth allocates no bus, and knows no
+owner of one. The bus methods give runs of indices from the ranges of the
+client, and set and get the values of control buses.
+
+| Method | Sends | Gives |
+| --- | --- | --- |
+| `control_bus(count)` | nothing | the first index of a run of `count` free control buses of the client |
+| `audio_bus(count)` | nothing | the first index of a run of `count` free audio buses of the client |
+| `free_control_bus(first)` | nothing | `()`: the run of control buses that starts at `first` goes back to the client |
+| `free_audio_bus(first)` | nothing | `()`: the run of audio buses that starts at `first` goes back to the client |
+| `set_bus(index, value)` | `/c_set` of one control bus, a plain send | `()`, at once |
+| `get_bus(index)` | `/c_get` of one control bus, through the queue | the value of the bus, an `f32`, from the `/c_set` that answers |
+
+An index is an `i32`, as `/c_set`, `/n_map` and `/n_mapa` take it in
+scsynth-osc. `control_bus` and `audio_bus` take a run from the range of
+the client (see [The ids](#the-ids)), and need `register` first, as do
+`free_control_bus` and `free_audio_bus`. A count of 0 gives
+`Error::Exhausted`. A free of a run that the client does not hold changes
+nothing. `set_bus` and `get_bus` take any index of a control bus, and need
+no `register`.
+
+`set_bus` sends one message at once, outside the queue, as `send` does,
+and waits for nothing. No awaited method of the client sends `/c_set`. So
+only a `request` of the caller with `/c_set` can take the `/fail` of a
+`set_bus` (see [Plain sends](#plain-sends)). For a `/c_get` of an index
+out of range, scsynth 3.14.1 answers `/fail /c_get "index out of range"`.
+`get_bus` gives it as `Error::Failed`. Without a `/c_set` that holds its
+index, `get_bus` gives `Error::NoReply`.
 
 ## License
 

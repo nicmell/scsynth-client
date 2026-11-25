@@ -12,10 +12,14 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use scsynth_client::scsynth_osc::command::top_level::Notify;
-use scsynth_client::scsynth_osc::reply::command_replies::{Done, Fail};
+use scsynth_client::scsynth_osc::reply::buffer::BufferInfo;
+use scsynth_client::scsynth_osc::reply::command_replies::{BufferCommand, Done, Fail};
 use scsynth_client::scsynth_osc::reply::node_notification::{NodeKind, NodeState};
 use scsynth_client::scsynth_osc::reply::top_level::{StatusReply, VersionReply};
-use scsynth_client::scsynth_osc::{Bundle, Command, NodeId, Packet, Reply, SyncId, Timetag};
+use scsynth_client::scsynth_osc::{
+    BufferId, Bundle, Command, NodeId, Packet, Reply, SyncId, Timetag,
+};
+use scsynth_client::scsynth_synthdef::{Arg, BuildError, SynthDef, SynthDefBuilder};
 use scsynth_client::{ChannelClient, ChannelPeer, Error, Incoming, Options, Scsynth, Sleep, Timer};
 
 /// A timer whose sleeps end when the test fires them.
@@ -106,7 +110,18 @@ pub fn registered<A>(answer: A) -> (Scsynth, ChannelPeer, Receiver<Packet<Comman
 where
     A: FnMut(&Command) -> Vec<Reply> + Send + 'static,
 {
-    let (scsynth, peer, timer) = connect(Options::default());
+    registered_with(Options::default(), answer)
+}
+
+/// As [`registered`], with `options`.
+pub fn registered_with<A>(
+    options: Options,
+    answer: A,
+) -> (Scsynth, ChannelPeer, Receiver<Packet<Command>>, ManualTimer)
+where
+    A: FnMut(&Command) -> Vec<Reply> + Send + 'static,
+{
+    let (scsynth, peer, timer) = connect(options);
     let packets = serve(&peer, answer);
     assert!(now(scsynth.register()).is_ok(), "the client registers");
     assert_eq!(all(&packets).len(), 1);
@@ -207,6 +222,38 @@ pub fn failed(address: &str, message: &str) -> Error {
         message: message.to_owned(),
         value: None,
     }
+}
+
+pub fn buffer(index: i32) -> BufferId {
+    BufferId::new(index).expect("a buffer id")
+}
+
+/// The `/done` of a buffer command.
+pub fn done_buffer(command: BufferCommand, buffer: BufferId) -> Reply {
+    Reply::Done(Done::Buffer { command, buffer })
+}
+
+/// The entry of a buffer in a `/b_info`, at 44.1 kHz.
+pub fn buffer_info(buffer: BufferId, frames: i32, channels: i32) -> BufferInfo {
+    BufferInfo {
+        buffer,
+        frames,
+        channels,
+        sample_rate: 44_100.0,
+    }
+}
+
+/// `SynthDef(\sine, { |freq = 440| Out.ar(0, SinOsc.ar(freq)) })`.
+pub fn sine() -> SynthDef {
+    let build = || -> Result<SynthDef, BuildError> {
+        let mut builder = SynthDefBuilder::new("sine", vec![Arg::new("freq", 440.0)])?;
+        let freq = builder.arguments()[0].clone();
+        let sine = builder.ugen("SinOsc", "ar", &[("freq", freq.into())])?;
+        let out = [("bus", 0.0.into()), ("channelsArray", sine.into())];
+        builder.ugen("Out", "ar", &out)?;
+        builder.finish()
+    };
+    build().expect("the definition builds")
 }
 
 pub fn all<T>(receiver: &Receiver<T>) -> Vec<T> {

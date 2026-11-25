@@ -1,5 +1,7 @@
 use std::fmt;
 
+use scsynth_synthdef::{LimitError, ReadError};
+
 use crate::client::SendError;
 use crate::ids::IdKind;
 
@@ -39,6 +41,20 @@ pub enum Error {
     },
     /// No free id of this kind is left in the range of the client.
     Exhausted(IdKind),
+    /// The id is at or over the count of its kind in the
+    /// [`Options`](crate::Options) of the client.
+    OutOfRange {
+        /// The kind of the id.
+        kind: IdKind,
+        /// The id.
+        id: i32,
+    },
+    /// The bytes are no synth definition file: the error of
+    /// scsynth-synthdef.
+    Read(ReadError),
+    /// The synth definition breaks a limit of scsynth or of the format: the
+    /// error of scsynth-synthdef.
+    Limit(LimitError),
 }
 
 impl fmt::Display for Error {
@@ -58,13 +74,15 @@ impl fmt::Display for Error {
                 write!(f, "the client id {client_id} has no range of node ids")
             }
             Self::Exhausted(kind) => {
-                let kind = match kind {
-                    IdKind::Buffer => "buffer",
-                    IdKind::ControlBus => "control bus",
-                    IdKind::AudioBus => "audio bus",
-                };
+                let kind = name(*kind);
                 write!(f, "no free {kind} is left in the range of the client")
             }
+            Self::OutOfRange { kind, id } => {
+                let kind = name(*kind);
+                write!(f, "the {kind} {id} is over the count of the server")
+            }
+            Self::Read(_) => write!(f, "the bytes are no synth definition file"),
+            Self::Limit(_) => write!(f, "the synth definition breaks a limit of scsynth"),
         }
     }
 }
@@ -73,12 +91,24 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Send(error) => Some(error),
+            Self::Read(error) => Some(error),
+            Self::Limit(error) => Some(error),
             Self::Failed { .. }
             | Self::Timeout
             | Self::NoReply { .. }
             | Self::NotRegistered
             | Self::NoNodeRange { .. }
-            | Self::Exhausted(_) => None,
+            | Self::Exhausted(_)
+            | Self::OutOfRange { .. } => None,
         }
+    }
+}
+
+/// The name of an id of `kind`, in a message.
+fn name(kind: IdKind) -> &'static str {
+    match kind {
+        IdKind::Buffer => "buffer",
+        IdKind::ControlBus => "control bus",
+        IdKind::AudioBus => "audio bus",
     }
 }
