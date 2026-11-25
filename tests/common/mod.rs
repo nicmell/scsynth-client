@@ -1,6 +1,8 @@
 //! What the tests of the client share: a timer that the test fires, a poll
 //! by hand with no runtime, and a peer that plays scsynth.
 
+#![allow(dead_code, reason = "each test file uses a part of the helpers")]
+
 use std::future::{self, Future};
 use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,10 +12,11 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use scsynth_client::scsynth_osc::command::top_level::Notify;
-use scsynth_client::scsynth_osc::reply::command_replies::Done;
+use scsynth_client::scsynth_osc::reply::command_replies::{Done, Fail};
+use scsynth_client::scsynth_osc::reply::node_notification::{NodeKind, NodeState};
 use scsynth_client::scsynth_osc::reply::top_level::{StatusReply, VersionReply};
-use scsynth_client::scsynth_osc::{Bundle, Command, Packet, Reply, SyncId, Timetag};
-use scsynth_client::{ChannelClient, ChannelPeer, Incoming, Options, Scsynth, Sleep, Timer};
+use scsynth_client::scsynth_osc::{Bundle, Command, NodeId, Packet, Reply, SyncId, Timetag};
+use scsynth_client::{ChannelClient, ChannelPeer, Error, Incoming, Options, Scsynth, Sleep, Timer};
 
 /// A timer whose sleeps end when the test fires them.
 #[derive(Clone, Default)]
@@ -96,6 +99,20 @@ where
     received
 }
 
+/// A client on a channel pair whose peer answers with `answer`, after a
+/// `register` that the peer answered. The packet of `register` is taken, so
+/// the next request has the sync id 2.
+pub fn registered<A>(answer: A) -> (Scsynth, ChannelPeer, Receiver<Packet<Command>>, ManualTimer)
+where
+    A: FnMut(&Command) -> Vec<Reply> + Send + 'static,
+{
+    let (scsynth, peer, timer) = connect(Options::default());
+    let packets = serve(&peer, answer);
+    assert!(now(scsynth.register()).is_ok(), "the client registers");
+    assert_eq!(all(&packets).len(), 1);
+    (scsynth, peer, packets, timer)
+}
+
 /// The answers of a scsynth that registers its clients with the id 0 and a
 /// limit of 4 logins.
 pub fn answer(command: &Command) -> Vec<Reply> {
@@ -158,6 +175,38 @@ pub fn barrier(sync: i32) -> Packet<Command> {
 
 pub fn synced(sync: i32) -> Incoming {
     Incoming::Reply(Reply::Synced(SyncId(sync)))
+}
+
+/// The state of the synth `node`, alone in the root group.
+pub fn synth_state(node: i32) -> NodeState {
+    NodeState {
+        node: NodeId(node),
+        parent: Some(NodeId::ROOT),
+        prev: None,
+        next: None,
+        kind: NodeKind::Synth,
+    }
+}
+
+pub fn n_go(node: i32) -> Reply {
+    Reply::NGo(synth_state(node))
+}
+
+pub fn fail(command: &str, message: &str, value: Option<i32>) -> Reply {
+    Reply::Fail(Fail {
+        command: command.to_owned(),
+        message: message.to_owned(),
+        value,
+    })
+}
+
+/// The error of a `/fail` of `address` with no value.
+pub fn failed(address: &str, message: &str) -> Error {
+    Error::Failed {
+        address: address.to_owned(),
+        message: message.to_owned(),
+        value: None,
+    }
 }
 
 pub fn all<T>(receiver: &Receiver<T>) -> Vec<T> {

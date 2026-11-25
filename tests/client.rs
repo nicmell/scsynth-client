@@ -8,13 +8,14 @@ use std::task::Poll;
 use std::time::Duration;
 
 use common::{
-    ManualTimer, all, answer, barrier, connect, now, poll, request, serve, status, synced, version,
+    ManualTimer, all, answer, barrier, connect, fail, n_go, now, poll, request, serve, status,
+    synced, version,
 };
 use scsynth_client::scsynth_osc::command::node::NFree;
 use scsynth_client::scsynth_osc::command::synth::SNew;
 use scsynth_client::scsynth_osc::command::synth_def::DRecv;
 use scsynth_client::scsynth_osc::command::top_level::Notify;
-use scsynth_client::scsynth_osc::reply::command_replies::{Done, Fail};
+use scsynth_client::scsynth_osc::reply::command_replies::Done;
 use scsynth_client::scsynth_osc::reply::node_notification::{NodeKind, NodeState};
 use scsynth_client::scsynth_osc::{
     AddAction, Command, NewNodeId, NodeId, Packet, RawArg, RawMessage, Reply,
@@ -33,24 +34,6 @@ fn s_new(def: &str, node: i32) -> Command {
         action: AddAction::Head,
         target: NodeId::ROOT,
         controls: Vec::new(),
-    })
-}
-
-fn n_go(node: i32) -> Reply {
-    Reply::NGo(NodeState {
-        node: NodeId(node),
-        parent: Some(NodeId::ROOT),
-        prev: None,
-        next: None,
-        kind: NodeKind::Synth,
-    })
-}
-
-fn fail(command: &str, message: &str, value: Option<i32>) -> Reply {
-    Reply::Fail(Fail {
-        command: command.to_owned(),
-        message: message.to_owned(),
-        value,
     })
 }
 

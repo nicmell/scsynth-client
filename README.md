@@ -328,6 +328,122 @@ as the last one. Then its async `next()` gives `None`. It also gives
 subscription made after the close. A dropped subscription gets nothing
 more.
 
+### Nodes
+
+The node methods make, move, query, set and free the synths and the
+groups of scsynth. They take and give the types of scsynth-osc: `NodeId`,
+`ControlSetting`, `ControlMapping`, `Control`, the `NodeState` of
+`reply::node_notification` and the `GQueryTreeReply` of `reply::group`.
+
+| Method | Sends | Gives |
+| --- | --- | --- |
+| `group(target)` | `/g_new` with the next node id, through the queue | the `NodeId` of the group |
+| `synth(name, controls, target)` | `/s_new` with the next node id, through the queue | the `NodeId` of the synth |
+| `free(node)` | `/n_free`, through the queue | `()` |
+| `run(node, on)` | `/n_run`, through the queue | `()` |
+| `free_all(group)` | `/g_freeAll`, through the queue | `()` |
+| `deep_free(group)` | `/g_deepFree`, through the queue | `()` |
+| `move_node(node, target)` | `/g_head`, `/g_tail`, `/n_before` or `/n_after`, by the target, through the queue | `()` |
+| `query(node)` | `/n_query`, through the queue | the `NodeState` of the `/n_info` of the node |
+| `tree(group, controls)` | `/g_queryTree`, through the queue | the `GQueryTreeReply` of the group. If `controls` is true, it holds the values of the controls. |
+| `get(node, control)` | `/s_get` of one control, through the queue | the value of the control, an `f32`, from the `/n_set` of the node |
+| `set(node, controls)` | `/n_set`, a plain send | `()`, at once |
+| `map(node, mappings)` | `/n_map`, a plain send | `()`, at once |
+| `ended(node, limit)` | nothing | a future that gives `()` at the `/n_end` of the node |
+
+`free_all` frees every node in the group. `deep_free` frees every synth
+in the group and in the groups inside it, and keeps the groups.
+`controls` and `mappings` take any list: an array, a `Vec` or an
+iterator. An empty list is `[]`.
+
+A `Target` is where a new node goes, or where a node moves:
+
+| Target | Place |
+| --- | --- |
+| `Target::head(group)` | at the head of the group, where the node runs first |
+| `Target::tail(group)` | at the tail of the group, where the node runs last |
+| `Target::before(node)` | just before the node, in its group |
+| `Target::after(node)` | just after the node, in its group |
+
+The root group of scsynth is node 0, `NodeId::ROOT`. `Target` does not
+take the fifth add action of scsynth-osc, `Replace`.
+
+`group` and `synth` take the next node id of the client (see
+[The ids](#the-ids)). Before `register`, they give `Error::NotRegistered`,
+and send nothing. If the request of a call fails, the node id that the
+call took stays taken.
+
+```rust
+use std::time::Duration;
+
+use scsynth_client::scsynth_osc::{ControlSetting, NodeId};
+use scsynth_client::{Error, Scsynth, Target};
+
+/// A synth of the definition `sine` in a new group: it plays at 440 Hz,
+/// then at 660 Hz, until `free` ends it.
+async fn play(scsynth: &Scsynth) -> Result<(), Error> {
+    scsynth.register().await?;
+    let group = scsynth.group(Target::head(NodeId::ROOT)).await?;
+    let freq = ControlSetting::new("freq", 440.0);
+    let synth = scsynth.synth("sine", [freq], Target::tail(group)).await?;
+    let ended = scsynth.ended(synth, Duration::from_secs(10));
+    scsynth.set(synth, [ControlSetting::new("freq", 660.0)])?;
+    scsynth.free(synth).await?;
+    ended.await
+}
+```
+
+#### Notifications
+
+scsynth 3.14.1 sends `/n_go`, `/n_end`, `/n_on`, `/n_off`, `/n_move` and
+`/n_info` to every registered client, whichever client sent the command.
+It sends `/synced`, `/fail` and `/g_queryTree.reply` to the sender alone.
+A client that is not registered gets `/synced` and `/fail`, and no
+`/n_go`.
+
+So an awaited method settles at the `/synced` of its request, and needs
+no `/n_go`. scsynth sends the `/n_go` of a bundle before its `/synced`.
+So when `synth` or `group` gives `Ok`, the node exists.
+
+`query` takes the `/n_info` of its node among the replies, because a
+query of another client can put the `/n_info` of another node there.
+`get` takes the `/n_set` of its node, and `tree` the reply of its group.
+Without that reply, each one gives `Error::NoReply`. A client that is not
+registered gets no `/n_info`, so its `query` gives `Error::NoReply`.
+
+#### Set and map
+
+`set` and `map` send one message at once, outside the queue, as `send`
+does, and wait for nothing. No awaited method of the client sends `/n_set`
+or `/n_map`. So only a `request` of the caller with the same address can
+take the `/fail` of a `set` or a `map` (see [Plain sends](#plain-sends)).
+
+#### Ended
+
+`ended(node, limit)` gives a future that ends at the `/n_end` of the node.
+It is no `async fn`: its wait starts at the call. So an `/n_end` that
+comes between the call and the first poll is kept. Call it before the
+command that ends the node, such as `free`. An `/n_end` that came before
+the call is not seen, and the future then gives `Error::Timeout`.
+
+Its limit is its own argument, and not the limit of the client, because
+a node can live long. The sleep of the limit starts at the first poll, as
+for every call. scsynth sends `/n_end` to registered clients alone. So a
+client that is not registered at the call gets `Error::NotRegistered`
+from the future, and no wait starts.
+
+#### Failures
+
+scsynth 3.14.1 answered these commands with a `/fail`, which the method
+gives as `Error::Failed`, with the message:
+
+| Command | Message |
+| --- | --- |
+| `/s_new` of a definition that scsynth does not have | `SynthDef not found` |
+| `/s_new` with a node id in use | `duplicate node ID` |
+| `/s_new` with a target group 9999 that does not exist | `Group 9999 not found` |
+| `/n_free 9999` of a node that does not exist | `Node 9999 not found` |
+
 ## License
 
 Licensed under either of the Apache License, Version 2.0

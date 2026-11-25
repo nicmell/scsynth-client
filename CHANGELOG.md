@@ -39,3 +39,11 @@ scsynth-synthdef 0.15.0 by git tag.
   kind of a range. See [The ids](README.md#the-ids).
 - `Timer` and `Sleep`: the clock that the awaited methods race against
   their limit.
+- The node methods of `Scsynth`. `group`, `synth`, `free`, `run`,
+  `free_all`, `deep_free`, `move_node`, `query`, `tree` and `get` send
+  requests through the queue. `group` and `synth` take the next node id
+  of the client. `set` and `map` are plain sends of `/n_set` and
+  `/n_map`. `ended` gives a future of the `/n_end` of a node, whose wait
+  starts at its call. See [Nodes](README.md#nodes).
+- `Target`: where a new node goes, or where a node moves: the head or the
+  tail of a group, or just before or just after a node.

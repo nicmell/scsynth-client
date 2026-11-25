@@ -21,7 +21,7 @@ pub use client::{
 pub use error::Error;
 pub use ids::IdKind;
 pub use options::Options;
-pub use scsynth::{Registration, Scsynth, Subscription};
+pub use scsynth::{Registration, Scsynth, Subscription, Target};
 pub use timer::{Sleep, Timer};
 
 /// The OSC protocol of scsynth: the types of the commands and the replies.

@@ -20,13 +20,6 @@ pub(crate) enum Wait {
     /// A `/done /quit`.
     Quit,
     /// The `/n_end` of the node.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "its one user, the method `ended`, comes in a later step"
-        )
-    )]
     End(NodeId),
 }
 

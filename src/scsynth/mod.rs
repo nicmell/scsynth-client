@@ -17,6 +17,10 @@ use crate::options::Options;
 use crate::timer::Timer;
 use crate::wait::{self, Raced, Receiver, Sender, Writer};
 
+mod nodes;
+
+pub use nodes::Target;
+
 /// A client of scsynth over one [`OscClient`]: a handle, whose clones share
 /// one connection.
 ///
@@ -356,10 +360,6 @@ impl Scsynth {
     /// # Errors
     ///
     /// [`Error::NotRegistered`] before [`Self::register`].
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "step 5, the node methods, is its first caller")
-    )]
     pub(crate) fn next_node_id(&self) -> Result<NodeId, Error> {
         self.with_ids(|ids| Ok(ids.next_node()))
     }
