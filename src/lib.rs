@@ -19,6 +19,8 @@ mod timer;
 #[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
 mod udp;
 mod wait;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+mod web;
 
 pub use channel::{ChannelClient, ChannelPeer};
 pub use client::{
@@ -32,9 +34,13 @@ pub use scsynth::{Registration, Scsynth, Subscription, Target};
 pub use tcp::TcpClient;
 #[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
 pub use timer::TokioTimer;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub use timer::WebTimer;
 pub use timer::{Sleep, Timer};
 #[cfg(all(feature = "tokio", not(target_arch = "wasm32")))]
 pub use udp::{DEFAULT_MAX_DATAGRAM, UdpClient};
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub use web::{PortClient, WebSocketClient};
 
 /// The OSC protocol of scsynth: the types of the commands and the replies.
 pub use scsynth_osc;

@@ -22,9 +22,24 @@ tokio = { version = "1.54.1", optional = true, default-features = false, feature
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1.54.1", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 
+# The feature `web` is empty on a native target, where `--all-features` must build without a browser.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { version = "0.3.106", optional = true, default-features = false }
+wasm-bindgen = { version = "0.2.129", optional = true }
+web-sys = { version = "0.3.106", optional = true, default-features = false, features = [
+    "BinaryType",
+    "CloseEvent",
+    "DedicatedWorkerGlobalScope",
+    "EventTarget",
+    "MessageEvent",
+    "MessagePort",
+    "WebSocket",
+    "Worker",
+] }
+
 [features]
 tokio = ["dep:tokio"]
-web = []
+web = ["dep:js-sys", "dep:wasm-bindgen", "dep:web-sys"]
 serde = ["scsynth-osc/serde", "scsynth-synthdef/serde"]
 
 [[test]]

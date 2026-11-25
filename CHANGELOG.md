@@ -79,3 +79,15 @@ scsynth-synthdef 0.15.0 by git tag.
   [The transports of tokio](README.md#the-transports-of-tokio).
 - `TokioTimer`, the `Timer` of tokio, and `Scsynth::new`: a client with
   that timer. See [The timer of tokio](README.md#the-timer-of-tokio).
+- The feature `web`, on `wasm32`: `WebSocketClient` and `PortClient`,
+  transports over the objects of the browser, in a page and in a worker.
+  `WebSocketClient::open` opens a `WebSocket` of the browser, and sends
+  one binary frame for each packet. `PortClient` posts one `Uint8Array`
+  for each packet, and transfers its buffer, to a `MessagePort`, a
+  `Worker` or a `DedicatedWorkerGlobalScope`. They build for
+  `wasm32-unknown-unknown`, but no test runs them yet. See
+  [The transports of the browser](README.md#the-transports-of-the-browser).
+- `WebTimer`, the `Timer` of the browser, on the `setTimeout` of the
+  global object, and `Scsynth::new` on `wasm32` with the feature `web`: a
+  client with that timer. See
+  [The timer of the browser](README.md#the-timer-of-the-browser).

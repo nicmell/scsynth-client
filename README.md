@@ -229,6 +229,84 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## The transports of the browser
+
+With the feature `web`, on `wasm32`, the crate has two transports over
+the objects of the browser: `WebSocketClient` and `PortClient`. They run
+in a page and in a worker. On a native target, the feature holds nothing.
+These transports build for `wasm32-unknown-unknown`, but no test runs
+them yet.
+
+- `send` encodes the packet, hands its bytes to the browser, and returns.
+  The browser queues them, and `send` waits for no network.
+- The handlers of the events of the browser call the listener, one event
+  at a time, with no borrow held. So the listener can call `send`,
+  `listen` and `close`. A call from inside the listener does not call the
+  listener again: the events that it adds come after the listener
+  returns. The events that arrive before `listen` wait, and come at
+  `listen`, in order.
+- The listener gets `Event::Closed` once, and no event after it.
+- A client that drops removes its handlers, and its listener gets no more
+  event.
+
+### WebSocket
+
+`WebSocketClient::open(url)` makes a `WebSocket` of the browser, with the
+binary type `arraybuffer`, and ends at its `open` event. If the browser
+refuses the URL, or if an `error` or a `close` event comes before the
+`open` event, it gives `ClientError::Transport`.
+
+Each packet is one binary frame, each way. A frame from the other end
+comes as its messages, in order. Bytes that are no OSC packet come as an
+`Event::Error` with `ClientError::Decode`, and a text frame as an
+`Event::Error` with `ClientError::Transport`. Once the socket is not open,
+`send` gives `SendError::Closed`.
+
+`close` closes the socket. The other end and the network can close it
+too. At the `close` event of the socket, the listener gets
+`Event::Closed`. An `error` event of the open socket comes as an
+`Event::Error` before it. A client that drops closes its socket.
+
+scsynth has no websocket. So the other end of a `WebSocketClient` is a
+bridge: a program that carries each packet between the websocket and
+scsynth.
+
+### Message ports
+
+`PortClient` carries the packets over a target that posts messages:
+
+| Constructor | Target |
+| --- | --- |
+| `PortClient::from_port(port)` | a `MessagePort`, which it starts |
+| `PortClient::from_worker(worker)` | a `Worker`, on the side of the page that made it |
+| `PortClient::from_worker_scope(scope)` | the `DedicatedWorkerGlobalScope`, on the side of the worker |
+
+Each packet is one message, each way. `send` posts a `Uint8Array` of the
+bytes of the packet, and transfers its buffer. A message whose data is a
+`Uint8Array` or an `ArrayBuffer` comes as its messages, in order. Any
+other data comes as an `Event::Error`, so the target carries the packets
+alone.
+
+A `Worker` and a worker scope dispatch each message once, so a message
+that comes before the client exists is lost. A `MessagePort` keeps its
+messages until the client starts it.
+
+A port has no close event: when the other end closes it, the client gets
+no event, and `send` goes on. `close` removes the handler of the client,
+closes a `MessagePort`, and gives `Event::Closed`. Then `send` gives
+`SendError::Closed`. `close` does not terminate a worker, and does not
+close a worker scope. A client that drops does as `close`, with no
+`Event::Closed`.
+
+### The timer of the browser
+
+`WebTimer` is a `Timer` whose sleeps are `setTimeout` calls of the global
+object, so it runs in a page and in a worker. With the feature `web`, on
+`wasm32`, `Scsynth::new(client, options)` is
+`Scsynth::with_timer(client, WebTimer, options)`. `setTimeout` reads its
+delay as a signed 32-bit integer. So a sleep over `i32::MAX`
+milliseconds, about 24.8 days, ends after `i32::MAX` milliseconds.
+
 ## The client
 
 `Scsynth` is a client of scsynth over one transport. Its awaited methods
@@ -240,12 +318,15 @@ and `Sync`, and the future of each of its methods is `Send`.
 transport `client`, and sets the listener of that transport. The `Timer`
 makes the sleeps that the awaited methods race against their limit: its
 `sleep(limit)` gives a `Sleep`, a future that ends at the end of the
-limit. The client needs no runtime of its own: whatever polls its futures
-and the sleeps of its timer runs it. With the feature `tokio`,
-`Scsynth::new` takes the timer of tokio (see
-[The timer of tokio](#the-timer-of-tokio)). The timer of the web will come
-with the feature `web`, which holds nothing yet. On another runtime, the
-caller writes its own timer.
+limit. The client reads no clock of its own, because
+`std::time::Instant::now` panics on `wasm32-unknown-unknown`: the timer
+makes every sleep. The client needs no runtime of its own: whatever polls
+its futures and the sleeps of its timer runs it. With the feature
+`tokio`, `Scsynth::new` takes the timer of tokio (see
+[The timer of tokio](#the-timer-of-tokio)). With the feature `web`, on
+`wasm32`, it takes the timer of the browser (see
+[The timer of the browser](#the-timer-of-the-browser)). On another
+runtime, the caller writes its own timer.
 
 ```rust
 use std::future;
