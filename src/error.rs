@@ -21,6 +21,12 @@ pub enum Error {
     Timeout,
     /// The transport refused the packet, or it is closed.
     Send(SendError),
+    /// scsynth answered the call without the reply, or the value of a reply,
+    /// that the method reads.
+    NoReply {
+        /// The command whose reply is missing.
+        address: &'static str,
+    },
 }
 
 impl fmt::Display for Error {
@@ -32,6 +38,9 @@ impl fmt::Display for Error {
             } => write!(f, "scsynth failed {address}: {}", message.trim_end()),
             Self::Timeout => write!(f, "scsynth did not answer within the limit"),
             Self::Send(_) => write!(f, "the transport did not send the packet"),
+            Self::NoReply { address } => {
+                write!(f, "scsynth answered without the reply of {address}")
+            }
         }
     }
 }
@@ -40,7 +49,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Send(error) => Some(error),
-            Self::Failed { .. } | Self::Timeout => None,
+            Self::Failed { .. } | Self::Timeout | Self::NoReply { .. } => None,
         }
     }
 }

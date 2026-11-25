@@ -6,21 +6,21 @@
 
 mod channel;
 mod client;
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "its one user, the client `Scsynth`, comes in the next step"
-    )
-)]
 mod core;
 mod error;
+mod options;
+mod scsynth;
+mod timer;
+mod wait;
 
 pub use channel::{ChannelClient, ChannelPeer};
 pub use client::{
     ClientError, Event, Incoming, Listener, MaybeSend, MaybeSync, OscClient, SendError, decode,
 };
 pub use error::Error;
+pub use options::Options;
+pub use scsynth::{Registration, Scsynth, Subscription};
+pub use timer::{Sleep, Timer};
 
 /// The OSC protocol of scsynth: the types of the commands and the replies.
 pub use scsynth_osc;

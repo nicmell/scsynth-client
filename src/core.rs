@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use scsynth_osc::reply::command_replies::Fail;
+use scsynth_osc::reply::command_replies::{Done, Fail};
 use scsynth_osc::{Bundle, Command, NodeId, Packet, RawArg, Reply, SyncId, Timetag};
 
 use crate::client::{Incoming, SendError};
@@ -17,7 +17,16 @@ pub(crate) enum Wait {
     Status,
     /// A `/version.reply`.
     Version,
+    /// A `/done /quit`.
+    Quit,
     /// The `/n_end` of the node.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "its one user, the method `ended`, comes in a later step"
+        )
+    )]
     End(NodeId),
 }
 
@@ -259,7 +268,9 @@ impl Core {
 impl Wait {
     fn answered_by(self, reply: &Reply) -> bool {
         match (self, reply) {
-            (Self::Status, Reply::StatusReply(_)) | (Self::Version, Reply::VersionReply(_)) => true,
+            (Self::Status, Reply::StatusReply(_))
+            | (Self::Version, Reply::VersionReply(_))
+            | (Self::Quit, Reply::Done(Done::Quit)) => true,
             (Self::End(node), Reply::NEnd(state)) => state.node == node,
             _ => false,
         }
@@ -313,7 +324,6 @@ mod tests {
     use scsynth_osc::command::synth::SNew;
     use scsynth_osc::command::synth_def::DRecv;
     use scsynth_osc::command::top_level::Notify;
-    use scsynth_osc::reply::command_replies::Done;
     use scsynth_osc::reply::node_notification::{NodeKind, NodeState};
     use scsynth_osc::reply::top_level::{StatusReply, VersionReply};
     use scsynth_osc::{AddAction, BufferId, Completion, NewNodeId, RawMessage};
@@ -624,6 +634,27 @@ mod tests {
                 first_node,
                 Ok(vec![Reply::NEnd(node(1000))])
             )]
+        );
+    }
+
+    #[test]
+    fn a_done_quit_settles_every_wait_for_quit_and_no_other() {
+        let mut core = Core::new();
+        let (first, _) = core.wait(Wait::Quit);
+        let (second, _) = core.wait(Wait::Quit);
+        let (status_wait, _) = core.wait(Wait::Status);
+        let quit = Reply::Done(Done::Quit);
+        assert_eq!(replay(&mut core, [Reply::Done(Done::NotifyOff)]), NOTHING);
+        assert_eq!(
+            replay(&mut core, [quit.clone()]),
+            [
+                Effect::Settle(first, Ok(vec![quit.clone()])),
+                Effect::Settle(second, Ok(vec![quit]))
+            ]
+        );
+        assert_eq!(
+            core.timed_out(status_wait),
+            [Effect::Settle(status_wait, Err(Error::Timeout))]
         );
     }
 
